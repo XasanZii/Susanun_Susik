@@ -25,3 +25,4 @@ video_temp_*.mp4
 dist/
 build/
 *.spec
+config.json
