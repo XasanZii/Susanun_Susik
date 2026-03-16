@@ -1,3 +1,4 @@
+# susik_media.py
 import av
 
 class SusikMedia:
@@ -5,13 +6,16 @@ class SusikMedia:
         self.input_p = input_p
 
     def process_conversion(self, output_p, copy_codec=True):
+        """
+        Возвращает (True, "Success") или (False, "error message")
+        """
         input_container = None
         output_container = None
         try:
             input_container = av.open(self.input_p)
             output_container = av.open(output_p, mode='w')
-
             stream_map = {}
+
             # Выбираем только видео и аудио дорожки
             for stream in input_container.streams:
                 if stream.type in ('video', 'audio'):
@@ -25,22 +29,24 @@ class SusikMedia:
                                 out_stream.width = stream.width
                                 out_stream.height = stream.height
                                 out_stream.pix_fmt = 'yuv420p'
-                        
                         stream_map[stream.index] = out_stream
                     except Exception:
-                        continue # Пропускаем дорожки, которые не лезут в MP4
+                        # пропускаем дорожки, которые не лезут в MP4
+                        continue
 
             for packet in input_container.demux():
                 if packet.stream.index in stream_map:
                     out_stream = stream_map[packet.stream.index]
-                    
                     if copy_codec:
-                        # КОРРЕКЦИЯ ТАЙМСТЕМПОВ (Исправляет вашу ошибку)
-                        packet.pts = packet.pts
-                        packet.dts = packet.dts
-                        packet.rescale_ts(out_stream.time_base)
-                        packet.stream = out_stream
-                        output_container.mux(packet)
+                        # Коррекция таймстемпов
+                        try:
+                            packet.pts = packet.pts
+                            packet.dts = packet.dts
+                            packet.rescale_ts(out_stream.time_base)
+                            packet.stream = out_stream
+                            output_container.mux(packet)
+                        except Exception:
+                            continue
                     else:
                         for frame in packet.decode():
                             packets = out_stream.encode(frame)
@@ -54,8 +60,17 @@ class SusikMedia:
                         output_container.mux(out_packet)
 
             return True, "Success"
+
         except Exception as e:
             return False, str(e)
         finally:
-            if output_container: output_container.close()
-            if input_container: input_container.close()
+            if output_container:
+                try:
+                    output_container.close()
+                except Exception:
+                    pass
+            if input_container:
+                try:
+                    input_container.close()
+                except Exception:
+                    pass

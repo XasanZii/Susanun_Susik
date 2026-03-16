@@ -87,10 +87,13 @@ class VideoApp(QWidget):
         self.cb_show = QCheckBox("Показывать видео")
         self.cb_show.setChecked(True)
         self.cb_show.stateChanged.connect(self.toggle_video)
-        self.cb_conv = QCheckBox("Конвертация (Susik)")
-        self.cb_conv.setChecked(True)
+
+# новый чекбокс для использования workers/converter
+        self.cb_use_workers = QCheckBox("Использовать Susik-конвертер")
+        self.cb_use_workers.setChecked(True)
+
         opts_layout.addWidget(self.cb_show)
-        opts_layout.addWidget(self.cb_conv)
+        opts_layout.addWidget(self.cb_use_workers)
         self.main_layout.addLayout(opts_layout)
 
         self.log_box = QTextEdit()
@@ -183,12 +186,13 @@ class VideoApp(QWidget):
 
     def start_download(self):
         url = self.url_input.text().strip()
-        if not url: return
+        if not url:
+            return
         self.log_box.clear()
-        
-        self.dl_thread = VideoDownloaderThread(url, self.download_dir) 
-        # ИСПРАВЛЕНО: подключаем к правильному методу update_ui
-        self.dl_thread.progress_signal.connect(self.update_ui) 
+        use_conv = getattr(self, "cb_use_workers", None)
+        use_conv_val = use_conv.isChecked() if use_conv is not None else True
+        self.dl_thread = VideoDownloaderThread(url, self.download_dir, use_conversion=use_conv_val)
+        self.dl_thread.progress_signal.connect(self.update_ui)
         self.dl_thread.finished_signal.connect(self.handle_finish)
         self.dl_thread.start()
 
