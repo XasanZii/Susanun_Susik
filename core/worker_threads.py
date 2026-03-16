@@ -1,4 +1,5 @@
-import os, yt_dlp, re
+import os, yt_dlp
+import re
 from PyQt6.QtCore import QThread, pyqtSignal
 from susik_media import SusikMedia
 

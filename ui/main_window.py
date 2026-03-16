@@ -1,4 +1,5 @@
 import os, vlc, json
+import re
 from datetime import datetime
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QLineEdit, QLabel, QFrame, QProgressBar, QCheckBox, 
@@ -195,6 +196,16 @@ class VideoApp(QWidget):
         p, _ = QFileDialog.getOpenFileName(self, "Открыть видео", self.download_dir, "Video (*.mp4 *.mkv *.avi)")
         if p: self.play_final(p)
 
+    def handle_finish(self, path: str):
+        if path:
+            self.add_log(f"Загрузка завершена: {path}", "SUCCESS")
+        # проигрываем файл (play_final уже делает логику проверки/проигрывания)
+            self.play_final(path)
+        else:
+            self.add_log("Загрузка завершилась без файла", "ERROR")
+        # скрыть прогрессбар / восстановить состояние UI
+            self.progress_bar.hide()
+    
     def play_final(self, path):
         if not path:
             self.add_log("Завершено без файла", "ERROR")
