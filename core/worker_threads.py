@@ -1,16 +1,16 @@
-import os, subprocess, shutil
+import os, shutil
 from PyQt6.QtCore import QThread, pyqtSignal
 import yt_dlp
+from susik_media import SusikMedia  # Импортируем нашу библиотеку
 
 class VideoDownloaderThread(QThread):
     progress_signal = pyqtSignal(object)
     finished_signal = pyqtSignal(str)
 
-    def __init__(self, url, output_path, ffmpeg_path):
+    def __init__(self, url, output_path): # Убрали ffmpeg_path
         super().__init__()
         self.url = url
         self.output_path = output_path
-        self.ffmpeg_path = ffmpeg_path
 
     def run(self):
         strategies = [
@@ -24,10 +24,10 @@ class VideoDownloaderThread(QThread):
             ("Vivaldi", {'cookiesfrombrowser': ('vivaldi', 'default')})
         ]
 
+        # Настройки для yt_dlp. ВАЖНО: Мы убираем ffmpeg_location
         base_opts = {
-            'format': 'bestvideo+bestaudio/best',
+            'format': 'best', # Берем лучший готовый формат (чтобы избежать нужды в ffmpeg для склейки)
             'outtmpl': self.output_path,
-            'ffmpeg_location': self.ffmpeg_path,
             'progress_hooks': [self.progress_hook],
             'nocheckcertificate': True,
             'ignoreerrors': True,  
@@ -42,10 +42,11 @@ class VideoDownloaderThread(QThread):
             current_opts = {**base_opts, **cookie_opt}
             try:
                 with yt_dlp.YoutubeDL(current_opts) as ydl:
-                    result = ydl.download([self.url])
+                    ydl.download([self.url])
+                
                 if os.path.exists(self.output_path):
                     f_size = os.path.getsize(self.output_path)
-                    if f_size > 50000: # Больше 50 КБ - считаем успехом
+                    if f_size > 50000:
                         self.progress_signal.emit(f"Успешно скачано через {name}!")
                         self.finished_signal.emit(self.output_path)
                         return
@@ -56,8 +57,7 @@ class VideoDownloaderThread(QThread):
                 self.progress_signal.emit(f"Метод {name} не сработал.")
                 continue
 
-        # Если цикл закончился и мы не вышли через return
-        self.progress_signal.emit("Не удалось скачать видео ни одним из способов.")
+        self.progress_signal.emit("Не удалось скачать видео.")
         self.finished_signal.emit(None)
 
     def progress_hook(self, d):
@@ -77,32 +77,24 @@ class VideoDownloaderThread(QThread):
 class VideoConverterThread(QThread):
     finished_signal = pyqtSignal(str)
 
-    def __init__(self, input_p, output_p, ffmpeg_p):
+    def __init__(self, input_p, output_p): # Убрали ffmpeg_p
         super().__init__()
         self.input_p = input_p
         self.output_p = output_p
-        self.ffmpeg_p = ffmpeg_p
 
     def run(self):
+        """Здесь мы полностью заменили subprocess на SusikMedia."""
         try:
-            cmd = [
-                self.ffmpeg_p, "-y", "-i", self.input_p, 
-                "-c", "copy", # Сначала пробуем без перекодирования (очень быстро)
-                self.output_p
-            ]
+            # Инициализируем наш декодер
+            worker = SusikMedia(self.input_p)
             
-            result = subprocess.run(cmd, creationflags=subprocess.CREATE_NO_WINDOW)
-            if result.returncode != 0:
-                cmd_full = [
-                    self.ffmpeg_p, "-y", "-i", self.input_p, 
-                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-                    self.output_p
-                ]
-                subprocess.run(cmd_full, creationflags=subprocess.CREATE_NO_WINDOW)
+            # Попытка быстрой конвертации (логика была -c copy)
+            success = worker.process_conversion(self.output_p, copy_codec=True)
+            
+            if not success:
+                # Если не вышло, пробуем полное перекодирование (аналог libx264)
+                worker.process_conversion(self.output_p, copy_codec=False)
                 
             self.finished_signal.emit(self.output_p)
-        except:
+        except Exception:
             self.finished_signal.emit(self.input_p)
-
-# ты лох
-        
