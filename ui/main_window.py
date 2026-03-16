@@ -10,11 +10,10 @@ import ui.style_sheets as style_sheets
 class VideoApp(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Universal AI Player Pro")
+        self.setWindowTitle("Universal AI Player Pro (Susik Engine)")
         self.setMinimumWidth(700)
         
-        # Путь к ffmpeg
-        self.ffmpeg_path = os.path.join(os.getcwd(), "ffmpeg-master-latest-win64-gpl-shared", "bin", "ffmpeg.exe")
+        # FFmpeg путь удален. Теперь мы используем библиотеку SusikMedia внутри потоков.
         self.config_file = "config.json"
         
         self.is_dark_theme = self.load_theme_settings()
@@ -46,7 +45,7 @@ class VideoApp(QWidget):
         self.main_layout.addWidget(self.video_frame)
 
         info_box = QHBoxLayout()
-        self.status_label = QLabel("Готов")
+        self.status_label = QLabel("Готов (SusikMedia Active)")
         self.eta_label = QLabel("")
         info_box.addWidget(self.status_label)
         info_box.addStretch()
@@ -58,7 +57,7 @@ class VideoApp(QWidget):
         self.main_layout.addWidget(self.progress_bar)
 
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("Ссылка на видео...")
+        self.url_input.setPlaceholderText("Ссылка на видео (YouTube и др.)...")
         self.main_layout.addWidget(self.url_input)
 
         btns_layout = QHBoxLayout()
@@ -75,7 +74,7 @@ class VideoApp(QWidget):
         self.cb_show = QCheckBox("Показывать видео")
         self.cb_show.setChecked(True)
         self.cb_show.stateChanged.connect(self.toggle_video)
-        self.cb_conv = QCheckBox("Конвертация")
+        self.cb_conv = QCheckBox("Конвертация (Susik)")
         self.cb_conv.setChecked(True)
         opts_layout.addWidget(self.cb_show)
         opts_layout.addWidget(self.cb_conv)
@@ -104,7 +103,6 @@ class VideoApp(QWidget):
         self.save_theme_settings()
 
     def apply_theme(self):
-        # Используем сохраненные строки из модуля
         style = style_sheets.DARK_STYLE if self.is_dark_theme else style_sheets.LIGHT_STYLE
         self.setStyleSheet(style)
         self.btn_theme.setText("🌙 ТЕМНАЯ" if self.is_dark_theme else "☀️ СВЕТЛАЯ")
@@ -135,7 +133,9 @@ class VideoApp(QWidget):
         if not url: return
         self.log_box.clear()
         target = os.path.join(os.getcwd(), "video_temp.mp4")
-        self.dl_thread = VideoDownloaderThread(url, target, self.ffmpeg_path)
+        
+        # ВНИМАНИЕ: ffmpeg_path больше не передается
+        self.dl_thread = VideoDownloaderThread(url, target) 
         self.dl_thread.progress_signal.connect(self.update_progress)
         self.dl_thread.finished_signal.connect(self.handle_finish)
         self.dl_thread.start()
@@ -145,14 +145,18 @@ class VideoApp(QWidget):
             self.status_label.setText("Ошибка скачивания")
             return
         if self.cb_conv.isChecked():
+            self.status_label.setText("Конвертация через SusikMedia...")
             out = path.replace(".mp4", "_fixed.mp4")
-            self.conv_thread = VideoConverterThread(path, out, self.ffmpeg_path)
+            
+            # ВНИМАНИЕ: ffmpeg_path больше не передается
+            self.conv_thread = VideoConverterThread(path, out)
             self.conv_thread.finished_signal.connect(self.play_final)
             self.conv_thread.start()
-        else: self.play_final(path)
+        else: 
+            self.play_final(path)
 
     def open_local(self):
-        p, _ = QFileDialog.getOpenFileName(self, "Выбрать видео", "", "Video (*.mp4 *.mkv)")
+        p, _ = QFileDialog.getOpenFileName(self, "Выбрать видео", "", "Video (*.mp4 *.mkv *.avi)")
         if p: self.play_final(p)
 
     def play_final(self, path):
