@@ -163,15 +163,14 @@ class VideoApp(QWidget):
         self.player = self.vlc_inst.media_player_new()
         self.player.set_hwnd(self.video_frame.winId())
 
-    def start_download(self):
+def start_download(self):
         url = self.url_input.text().strip()
         if not url: return
         self.log_box.clear()
+        self.status_label.setText("Получение информации...")
         
-        # Теперь файл сохраняется в выбранную пользователем папку
-        target = os.path.join(self.download_dir, "video_temp.mp4")
-        
-        self.dl_thread = VideoDownloaderThread(url, target) 
+        # Передаем только URL и ПАПКУ. Поток сам решит, как назвать файл.
+        self.dl_thread = VideoDownloaderThread(url, self.download_dir) 
         self.dl_thread.progress_signal.connect(self.update_progress)
         self.dl_thread.finished_signal.connect(self.handle_finish)
         self.dl_thread.start()
@@ -180,9 +179,13 @@ class VideoApp(QWidget):
         if not path:
             self.status_label.setText("Ошибка скачивания")
             return
+            
         if self.cb_conv.isChecked():
-            self.status_label.setText("Конвертация через SusikMedia...")
-            out = path.replace(".mp4", "_fixed.mp4")
+            self.status_label.setText("Оптимизация (SusikMedia)...")
+            # Создаем имя для конвертированного файла (напр. "Title_fixed.mp4")
+            base, ext = os.path.splitext(path)
+            out = f"{base}_fixed{ext}"
+            
             self.conv_thread = VideoConverterThread(path, out)
             self.conv_thread.finished_signal.connect(self.play_final)
             self.conv_thread.start()
