@@ -4,7 +4,6 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                              QFileDialog, QTextEdit, QSizePolicy)
 from PyQt6.QtCore import Qt
 from core.worker_threads import VideoDownloaderThread, VideoConverterThread
-# Импортируем напрямую из файла
 import ui.style_sheets as style_sheets
 
 class VideoApp(QWidget):
@@ -13,37 +12,48 @@ class VideoApp(QWidget):
         self.setWindowTitle("Universal AI Player Pro (Susik Engine)")
         self.setMinimumWidth(700)
         
-        # FFmpeg путь удален. Теперь мы используем библиотеку SusikMedia внутри потоков.
         self.config_file = "config.json"
         
-        self.is_dark_theme = self.load_theme_settings()
+        # Загружаем настройки (тема и путь)
+        settings = self.load_settings()
+        self.is_dark_theme = settings.get("dark_theme", True)
+        self.download_dir = settings.get("download_path", os.getcwd()) # По умолчанию текущая папка
         
         self.init_ui()
         self.apply_theme()
         self.init_vlc()
 
-    def load_theme_settings(self):
+    def load_settings(self):
+        """Загрузка всех настроек из JSON."""
         if os.path.exists(self.config_file):
             try:
-                with open(self.config_file, "r") as f:
-                    return json.load(f).get("dark_theme", True)
-            except: return True
-        return True
+                with open(self.config_file, "r", encoding='utf-8') as f:
+                    return json.load(f)
+            except: return {}
+        return {}
 
-    def save_theme_settings(self):
+    def save_settings(self):
+        """Сохранение всех настроек в JSON."""
+        data = {
+            "dark_theme": self.is_dark_theme,
+            "download_path": self.download_dir
+        }
         try:
-            with open(self.config_file, "w") as f:
-                json.dump({"dark_theme": self.is_dark_theme}, f)
-        except: pass
+            with open(self.config_file, "w", encoding='utf-8') as f:
+                json.dump(data, f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            print(f"Ошибка сохранения настроек: {e}")
 
     def init_ui(self):
         self.main_layout = QVBoxLayout(self)
 
+        # Видео фрейм
         self.video_frame = QFrame()
         self.video_frame.setStyleSheet("background-color: black;")
         self.video_frame.setMinimumHeight(400)
         self.main_layout.addWidget(self.video_frame)
 
+        # Инфо панель
         info_box = QHBoxLayout()
         self.status_label = QLabel("Готов (SusikMedia Active)")
         self.eta_label = QLabel("")
@@ -56,10 +66,25 @@ class VideoApp(QWidget):
         self.progress_bar.hide()
         self.main_layout.addWidget(self.progress_bar)
 
+        # Поле URL
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("Ссылка на видео (YouTube и др.)...")
+        self.url_input.setPlaceholderText("Ссылка на видео...")
         self.main_layout.addWidget(self.url_input)
 
+        # --- Панель выбора папки (НОВОЕ) ---
+        path_layout = QHBoxLayout()
+        self.path_display = QLineEdit(self.download_dir)
+        self.path_display.setReadOnly(True) 
+        self.path_display.setPlaceholderText("Папка для сохранения...")
+        self.btn_select_path = QPushButton("ПАПКА")
+        self.btn_select_path.clicked.connect(self.choose_directory)
+        
+        path_layout.addWidget(self.path_display)
+        path_layout.addWidget(self.btn_select_path)
+        self.main_layout.addLayout(path_layout)
+        # -----------------------------------
+
+        # Кнопки управления
         btns_layout = QHBoxLayout()
         self.btn_load = QPushButton("СКАЧАТЬ")
         self.btn_file = QPushButton("ФАЙЛ")
@@ -70,6 +95,7 @@ class VideoApp(QWidget):
             btns_layout.addWidget(b)
         self.main_layout.addLayout(btns_layout)
 
+        # Опции
         opts_layout = QHBoxLayout()
         self.cb_show = QCheckBox("Показывать видео")
         self.cb_show.setChecked(True)
@@ -85,6 +111,7 @@ class VideoApp(QWidget):
         self.log_box.hide()
         self.main_layout.addWidget(self.log_box)
 
+        # Плеер
         player_layout = QHBoxLayout()
         for cmd in ["Play", "Pause", "Stop"]:
             btn = QPushButton(cmd)
@@ -97,10 +124,18 @@ class VideoApp(QWidget):
         self.btn_theme.clicked.connect(self.toggle_theme)
         self.btn_log.clicked.connect(self.toggle_logs)
 
+    def choose_directory(self):
+        """Диалог выбора папки."""
+        dir_path = QFileDialog.getExistingDirectory(self, "Выбрать папку для сохранения", self.download_dir)
+        if dir_path:
+            self.download_dir = dir_path
+            self.path_display.setText(dir_path)
+            self.save_settings() # Сразу сохраняем путь
+
     def toggle_theme(self):
         self.is_dark_theme = not self.is_dark_theme
         self.apply_theme()
-        self.save_theme_settings()
+        self.save_settings()
 
     def apply_theme(self):
         style = style_sheets.DARK_STYLE if self.is_dark_theme else style_sheets.LIGHT_STYLE
@@ -132,9 +167,10 @@ class VideoApp(QWidget):
         url = self.url_input.text().strip()
         if not url: return
         self.log_box.clear()
-        target = os.path.join(os.getcwd(), "video_temp.mp4")
         
-        # ВНИМАНИЕ: ffmpeg_path больше не передается
+        # Теперь файл сохраняется в выбранную пользователем папку
+        target = os.path.join(self.download_dir, "video_temp.mp4")
+        
         self.dl_thread = VideoDownloaderThread(url, target) 
         self.dl_thread.progress_signal.connect(self.update_progress)
         self.dl_thread.finished_signal.connect(self.handle_finish)
@@ -147,8 +183,6 @@ class VideoApp(QWidget):
         if self.cb_conv.isChecked():
             self.status_label.setText("Конвертация через SusikMedia...")
             out = path.replace(".mp4", "_fixed.mp4")
-            
-            # ВНИМАНИЕ: ffmpeg_path больше не передается
             self.conv_thread = VideoConverterThread(path, out)
             self.conv_thread.finished_signal.connect(self.play_final)
             self.conv_thread.start()
@@ -156,7 +190,7 @@ class VideoApp(QWidget):
             self.play_final(path)
 
     def open_local(self):
-        p, _ = QFileDialog.getOpenFileName(self, "Выбрать видео", "", "Video (*.mp4 *.mkv *.avi)")
+        p, _ = QFileDialog.getOpenFileName(self, "Выбрать видео", self.download_dir, "Video (*.mp4 *.mkv *.avi)")
         if p: self.play_final(p)
 
     def play_final(self, path):

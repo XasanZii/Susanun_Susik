@@ -1,0 +1,24 @@
+# Python bytecode (кэш компиляции)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Виртуальные окружения
+venv/
+env/
+.env
+
+# Файлы настроек IDE
+.vscode/
+.idea/
+
+# Локальные конфиги и временные медиа-файлы проекта
+config.json
+video_temp.mp4
+*_fixed.mp4
+*.log
+video_temp_*.mp4
+# Результаты сборки (если будешь упаковывать в .exe)
+dist/
+build/
+*.spec

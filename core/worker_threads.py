@@ -12,52 +12,46 @@ class VideoDownloaderThread(QThread):
         self.url = url
         self.output_path = output_path
 
-    def run(self):
-        strategies = [
-            ("Без куков", {}),
-            ("Файл cookies.txt", {'cookiefile': 'cookies.txt'}),
-            ("Chrome", {'cookiesfrombrowser': ('chrome', 'default')}),
-            ("Edge", {'cookiesfrombrowser': ('edge', 'default')}),
-            ("Firefox", {'cookiesfrombrowser': ('firefox', 'default')}),
-            ("Opera", {'cookiesfrombrowser': ('opera', 'default')}),
-            ("Yandex", {'cookiesfrombrowser': ('yandex', 'default')}),
-            ("Vivaldi", {'cookiesfrombrowser': ('vivaldi', 'default')})
-        ]
+class VideoDownloaderThread(QThread):
+    progress_signal = pyqtSignal(object)
+    finished_signal = pyqtSignal(str)
 
-        # Настройки для yt_dlp. ВАЖНО: Мы убираем ffmpeg_location
+    def __init__(self, url, download_dir): # Теперь передаем только папку
+        super().__init__()
+        self.url = url
+        self.download_dir = download_dir
+
+    def run(self):
+        # Опции теперь не включают жесткий outtmpl, мы его сформируем динамически
         base_opts = {
-            'format': 'best', # Берем лучший готовый формат (чтобы избежать нужды в ffmpeg для склейки)
-            'outtmpl': self.output_path,
+            'format': 'best',
             'progress_hooks': [self.progress_hook],
             'nocheckcertificate': True,
-            'ignoreerrors': True,  
-            'quiet': True,        
-            'no_warnings': True
+            'quiet': True,
         }
 
-        for name, cookie_opt in strategies:
-            if 'cookiefile' in cookie_opt and not os.path.exists(cookie_opt['cookiefile']):
-                continue
-            self.progress_signal.emit(f"Попытка: {name}...")
-            current_opts = {**base_opts, **cookie_opt}
-            try:
-                with yt_dlp.YoutubeDL(current_opts) as ydl:
-                    ydl.download([self.url])
+        try:
+            with yt_dlp.YoutubeDL(base_opts) as ydl:
+                # 1. Сначала получаем инфо о видео без скачивания
+                info = ydl.extract_info(self.url, download=False)
+                title = info.get('title', 'video').replace('/', '_').replace('\\', '_')
+                ext = info.get('ext', 'mp4')
                 
-                if os.path.exists(self.output_path):
-                    f_size = os.path.getsize(self.output_path)
-                    if f_size > 50000:
-                        self.progress_signal.emit(f"Успешно скачано через {name}!")
-                        self.finished_signal.emit(self.output_path)
-                        return
-                    else:
-                        os.remove(self.output_path)
-            
-            except Exception as e:
-                self.progress_signal.emit(f"Метод {name} не сработал.")
-                continue
+                # 2. Формируем полный путь
+                final_filename = f"{title}.{ext}"
+                final_path = os.path.join(self.download_dir, final_filename)
+                
+                # 3. Обновляем настройки и качаем
+                ydl.params['outtmpl'] = final_path
+                ydl.download([self.url])
 
-        self.progress_signal.emit("Не удалось скачать видео.")
+            if os.path.exists(final_path):
+                self.finished_signal.emit(final_path)
+                return
+
+        except Exception as e:
+            self.progress_signal.emit(f"Ошибка: {str(e)}")
+        
         self.finished_signal.emit(None)
 
     def progress_hook(self, d):
