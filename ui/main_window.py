@@ -150,20 +150,23 @@ class VideoApp(QWidget):
         self.log_box.setVisible(not self.log_box.isVisible())
         self.adjustSize()
 
-    def update_progress(self, data):
+    def update_ui(self, data):
+    # Если пришел словарь
         if isinstance(data, dict):
-            self.progress_bar.show()
-            self.progress_bar.setValue(data.get('percent', 0))
-            self.eta_label.setText(f"{data.get('speed', '')} ETA: {data.get('eta', '')}")
+            if data.get('status') == 'error':
+                self.label.setText(f"Ошибка: {data['msg']}")
+            else:
+                self.progress_bar.setValue(data.get('percent', 0))
+    # Если пришла просто строка (на случай старых ошибок)
         else:
-            self.log_box.append(str(data))
+            self.label.setText(str(data))
 
     def init_vlc(self):
         self.vlc_inst = vlc.Instance('--quiet')
         self.player = self.vlc_inst.media_player_new()
         self.player.set_hwnd(self.video_frame.winId())
 
-def start_download(self):
+    def start_download(self):
         url = self.url_input.text().strip()
         if not url: return
         self.log_box.clear()
