@@ -103,3 +103,6 @@ class VideoConverterThread(QThread):
             self.finished_signal.emit(self.output_p)
         except:
             self.finished_signal.emit(self.input_p)
+
+# ты лох
+        
