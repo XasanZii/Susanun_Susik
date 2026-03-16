@@ -151,15 +151,27 @@ class VideoApp(QWidget):
         self.adjustSize()
 
     def update_ui(self, data):
-    # Если пришел словарь
         if isinstance(data, dict):
-            if data.get('status') == 'error':
-                self.label.setText(f"Ошибка: {data['msg']}")
-            else:
-                self.progress_bar.setValue(data.get('percent', 0))
-    # Если пришла просто строка (на случай старых ошибок)
+            status = data.get('status')
+            
+            if status == 'error':
+                self.status_label.setText(f"Ошибка: {data.get('msg')}")
+                self.progress_bar.hide()
+            
+            elif status == 'downloading':
+                percent = data.get('percent', 0)
+                self.progress_bar.setValue(percent)
+                
+                speed = data.get('speed', '---')
+                eta = data.get('eta', '---')
+                self.status_label.setText(f"Загрузка: {percent}% ({speed})")
+                self.eta_label.setText(f"Осталось: {eta}")
+
+            elif status == 'processing':
+                self.status_label.setText(data.get('msg', 'Обработка...'))
+                self.progress_bar.setRange(0, 0) # "Бесконечный" прогресс во время конвертации
         else:
-            self.label.setText(str(data))
+            self.status_label.setText(str(data))
 
     def init_vlc(self):
         self.vlc_inst = vlc.Instance('--quiet')
@@ -171,10 +183,11 @@ class VideoApp(QWidget):
         if not url: return
         self.log_box.clear()
         self.status_label.setText("Получение информации...")
+        self.progress_bar.show() # Показываем бар при старте
         
-        # Передаем только URL и ПАПКУ. Поток сам решит, как назвать файл.
         self.dl_thread = VideoDownloaderThread(url, self.download_dir) 
-        self.dl_thread.progress_signal.connect(self.update_progress)
+        # БЫЛО: self.update_progress -> СТАЛО: self.update_ui
+        self.dl_thread.progress_signal.connect(self.update_ui) 
         self.dl_thread.finished_signal.connect(self.handle_finish)
         self.dl_thread.start()
 
