@@ -22,3 +22,7 @@ video_temp_*.mp4
 dist/
 build/
 *.spec
+video_temp.mp4.part
+core/__pycache__/worker_threads.cpython-314.pyc
+ui/__pycache__/main_window.cpython-314.pyc
+ui/__pycache__/style_sheets.cpython-314.pyc
