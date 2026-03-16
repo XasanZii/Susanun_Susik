@@ -1,0 +1,4 @@
+PyQt6==6.10.2
+yt_dlp==2026.3.13
+python-vlc
+requests
