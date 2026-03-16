@@ -143,24 +143,32 @@ class VideoApp(QWidget):
         self.log_box.setVisible(not self.log_box.isVisible())
         self.adjustSize()
 
+    def clean_ansi(self, text):
+        """Удаляет ANSI-коды (цвета консоли) из строки."""
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        return ansi_escape.sub('', text)
+    
     def update_ui(self, data):
-        """Обработка данных из потока."""
+        """Обработка данных от загрузчика."""
         if isinstance(data, dict):
             status = data.get('status')
-            msg = data.get('msg', '')
-            if msg: 
-                level = "ERROR" if status == "error" else ("PROCESS" if status == "processing" else "INFO")
-                self.add_log(msg, level)
+            
+            # Очищаем данные от мусора (как на скрине)
+            speed = self.clean_ansi(data.get('speed', '---'))
+            eta = self.clean_ansi(data.get('eta', '---'))
+            msg = self.clean_ansi(data.get('msg', ''))
 
             if status == 'error':
-                self.status_label.setText("Ошибка")
-                self.progress_bar.hide()
+                self.status_label.setText(f"Ошибка: {msg}") # Исправлено: self.label -> self.status_label
+                self.add_log(msg, "ERROR")
+            
             elif status == 'downloading':
-                p = data.get('percent', 0)
+                percent = data.get('percent', 0)
                 self.progress_bar.show()
-                self.progress_bar.setValue(p)
-                self.status_label.setText(f"Загрузка: {p}%")
-                self.eta_label.setText(f"{data.get('speed')} | ETA: {data.get('eta')}")
+                self.progress_bar.setValue(percent)
+                self.status_label.setText(f"Загрузка: {percent}% ({speed})")
+                self.eta_label.setText(f"Осталось: {eta}")
+
             elif status == 'processing':
                 self.status_label.setText(msg)
                 self.progress_bar.setRange(0, 0)
@@ -176,12 +184,11 @@ class VideoApp(QWidget):
         url = self.url_input.text().strip()
         if not url: return
         self.log_box.clear()
-        self.add_log(f"Запуск загрузки для: {url}", "INFO")
         
-        use_conv = self.cb_conv.isChecked()
-        self.dl_thread = VideoDownloaderThread(url, self.download_dir, use_conv) 
-        self.dl_thread.progress_signal.connect(self.update_ui)
-        self.dl_thread.finished_signal.connect(self.play_final)
+        self.dl_thread = VideoDownloaderThread(url, self.download_dir) 
+        # ИСПРАВЛЕНО: подключаем к правильному методу update_ui
+        self.dl_thread.progress_signal.connect(self.update_ui) 
+        self.dl_thread.finished_signal.connect(self.handle_finish)
         self.dl_thread.start()
 
     def open_local(self):
