@@ -5,9 +5,14 @@ class SusikMedia:
     def __init__(self, input_p=None):
         self.input_p = input_p
 
-    def process_conversion(self, output_p, copy_codec=True):
+    def process_conversion(self, output_p, copy_codec=True, audio_only=False):
         """
         Возвращает (True, "Success") или (False, "error message")
+        
+        Args:
+            output_p: Путь сохранения
+            copy_codec: Копировать оригинальный кодек
+            audio_only: Если True, извлекает только аудио (MP3)
         """
         input_container = None
         output_container = None
@@ -16,23 +21,37 @@ class SusikMedia:
             output_container = av.open(output_p, mode='w')
             stream_map = {}
 
-            # Выбираем только видео и аудио дорожки
+            # Выбираем дорожки
             for stream in input_container.streams:
-                if stream.type in ('video', 'audio'):
-                    try:
-                        if copy_codec:
-                            out_stream = output_container.add_stream(template=stream)
-                        else:
-                            codec = 'libx264' if stream.type == 'video' else 'aac'
-                            out_stream = output_container.add_stream(codec)
-                            if stream.type == 'video':
-                                out_stream.width = stream.width
-                                out_stream.height = stream.height
-                                out_stream.pix_fmt = 'yuv420p'
-                        stream_map[stream.index] = out_stream
-                    except Exception:
-                        # пропускаем дорожки, которые не лезут в MP4
+                # Если audio_only, берем только аудио
+                if audio_only:
+                    if stream.type != 'audio':
                         continue
+                else:
+                    # Иначе видео и аудио
+                    if stream.type not in ('video', 'audio'):
+                        continue
+                
+                try:
+                    if copy_codec:
+                        out_stream = output_container.add_stream(template=stream)
+                    else:
+                        if stream.type == 'video':
+                            codec = 'libx264'
+                            out_stream = output_container.add_stream(codec)
+                            out_stream.width = stream.width
+                            out_stream.height = stream.height
+                            out_stream.pix_fmt = 'yuv420p'
+                        else:  # audio
+                            codec = 'aac' if not audio_only else 'libmp3lame'
+                            out_stream = output_container.add_stream(codec)
+                            if audio_only:
+                                out_stream.rate = stream.sample_rate
+                    
+                    stream_map[stream.index] = out_stream
+                except Exception:
+                    # пропускаем дорожки, которые не лезят в нужный формат
+                    continue
 
             for packet in input_container.demux():
                 if packet.stream.index in stream_map:
