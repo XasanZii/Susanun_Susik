@@ -26,3 +26,5 @@ dist/
 build/
 *.spec
 config.json
+chromewebstore.google.com_cookies.txt
+config.json

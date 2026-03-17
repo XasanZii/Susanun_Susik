@@ -1,18 +1,24 @@
-import os, vlc, json
+import os, json
+from os import path
 import re
 from datetime import datetime
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-                             QLineEdit, QLabel, QFrame, QProgressBar, QCheckBox, 
+                             QLineEdit, QLabel, QProgressBar, QCheckBox, 
                              QFileDialog, QTextEdit)
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
 from core.worker_threads import VideoDownloaderThread
 import ui.style_sheets as style_sheets
 
-class VideoApp(QWidget):
-    def __init__(self):
+class DownloadWindow(QWidget):
+    def __init__(self, player_window=None, logs_window=None, sheets_manager=None):
         super().__init__()
-        self.setWindowTitle("Universal AI Player Pro (Susik Engine)")
-        self.setMinimumWidth(700)
+        self.setWindowTitle("Universal AI Player Pro (Susik Engine) - Загрузка")
+        self.setFixedSize(700, 650)
+        
+        self.player_window = player_window
+        self.logs_window = logs_window
+        self.sheets_manager = sheets_manager
         
         self.config_file = "config.json"
         settings = self.load_settings()
@@ -21,7 +27,6 @@ class VideoApp(QWidget):
         
         self.init_ui()
         self.apply_theme()
-        self.init_vlc()
 
     def load_settings(self):
         if os.path.exists(self.config_file):
@@ -41,18 +46,50 @@ class VideoApp(QWidget):
 
     def init_ui(self):
         self.main_layout = QVBoxLayout(self)
+        self.main_layout.setSpacing(8)
+        self.main_layout.setContentsMargins(10, 10, 10, 10)
 
-        # Видео фрейм
-        self.video_frame = QFrame()
-        self.video_frame.setStyleSheet("background-color: black;")
-        self.video_frame.setMinimumHeight(400)
-        self.main_layout.addWidget(self.video_frame)
-
-        # Инфо панель
-        info_box = QHBoxLayout()
+        # Инфо панель с кнопками управления окнами в верхнем углу
+        top_layout = QHBoxLayout()
+        
         self.status_label = QLabel("Готов (SusikMedia Active)")
+        self.status_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        top_layout.addWidget(self.status_label)
+        
+        top_layout.addStretch()
+        
+        # Кнопка переключения на плеер
+        self.btn_to_player = QPushButton("▶️ ПЛЕЕР")
+        self.btn_to_player.setMaximumWidth(80)
+        self.btn_to_player.clicked.connect(self.show_player)
+        top_layout.addWidget(self.btn_to_player)
+        
+        # Кнопка темы (маленькая)
+        self.btn_theme = QPushButton("🌙")
+        self.btn_theme.setMaximumWidth(40)
+        self.btn_theme.setMaximumHeight(35)
+        self.btn_theme.clicked.connect(self.toggle_theme)
+        top_layout.addWidget(self.btn_theme)
+        
+        # Кнопка логов
+        self.btn_log = QPushButton("📋")
+        self.btn_log.setMaximumWidth(40)
+        self.btn_log.setMaximumHeight(35)
+        self.btn_log.clicked.connect(self.show_logs)
+        top_layout.addWidget(self.btn_log)
+        
+        # Кнопка выхода
+        self.btn_exit = QPushButton("❌")
+        self.btn_exit.setMaximumWidth(40)
+        self.btn_exit.setMaximumHeight(35)
+        self.btn_exit.clicked.connect(self.exit_app)
+        top_layout.addWidget(self.btn_exit)
+        
+        self.main_layout.addLayout(top_layout)
+
+        # Статус с ETA
+        info_box = QHBoxLayout()
         self.eta_label = QLabel("")
-        info_box.addWidget(self.status_label)
         info_box.addStretch()
         info_box.addWidget(self.eta_label)
         self.main_layout.addLayout(info_box)
@@ -76,51 +113,32 @@ class VideoApp(QWidget):
 
         btns_layout = QHBoxLayout()
         self.btn_load = QPushButton("СКАЧАТЬ")
+        self.btn_load.setMinimumHeight(40)
         self.btn_file = QPushButton("ФАЙЛ")
-        self.btn_theme = QPushButton("ТЕМА")
-        self.btn_log = QPushButton("ЛОГИ")
-        for b in [self.btn_load, self.btn_file, self.btn_theme, self.btn_log]:
+        self.btn_file.setMinimumHeight(40)
+        for b in [self.btn_load, self.btn_file]:
             btns_layout.addWidget(b)
         self.main_layout.addLayout(btns_layout)
 
         opts_layout = QHBoxLayout()
-        self.cb_show = QCheckBox("Показывать видео")
-        self.cb_show.setChecked(True)
-        self.cb_show.stateChanged.connect(self.toggle_video)
-
-# новый чекбокс для использования workers/converter
         self.cb_use_workers = QCheckBox("Использовать Susik-конвертер")
         self.cb_use_workers.setChecked(True)
-
-        opts_layout.addWidget(self.cb_show)
         opts_layout.addWidget(self.cb_use_workers)
         self.main_layout.addLayout(opts_layout)
 
-        self.log_box = QTextEdit()
-        self.log_box.setReadOnly(True)
-        self.log_box.hide()
-        self.main_layout.addWidget(self.log_box)
-
-        player_layout = QHBoxLayout()
-        for cmd in ["Play", "Pause", "Stop"]:
-            btn = QPushButton(cmd)
-            btn.clicked.connect(getattr(self, f"vlc_{cmd.lower()}"))
-            player_layout.addWidget(btn)
-        self.main_layout.addLayout(player_layout)
+        cookies_layout = QHBoxLayout()
+        self.cookies_input = QLineEdit()
+        self.cookies_input.setPlaceholderText("Путь к cookies.txt (опционально)")
+        self.cookies_browse_btn = QPushButton("Обзор")
+        self.cookies_browse_btn.clicked.connect(self.browse_cookies)
+        cookies_layout.addWidget(self.cookies_input)
+        cookies_layout.addWidget(self.cookies_browse_btn)
+        self.main_layout.addLayout(cookies_layout)
+        
+        self.main_layout.addStretch()
 
         self.btn_load.clicked.connect(self.start_download)
         self.btn_file.clicked.connect(self.open_local)
-        self.btn_theme.clicked.connect(self.toggle_theme)
-        self.btn_log.clicked.connect(self.toggle_logs)
-
-    def add_log(self, text, level="INFO"):
-        """Красивый вывод лога с временем и цветом."""
-        time_str = datetime.now().strftime("%H:%M:%S")
-        colors = {"INFO": "#5dade2", "SUCCESS": "#58d68d", "ERROR": "#ec7063", "PROCESS": "#f4d03f"}
-        color = colors.get(level, "#ffffff")
-        log_html = f"<span style='color:#888;'>[{time_str}]</span> <b style='color:{color};'>{level: <7}</b> | {text}"
-        self.log_box.append(log_html)
-        self.log_box.ensureCursorVisible()
 
     def choose_directory(self):
         dir_path = QFileDialog.getExistingDirectory(self, "Папка сохранения", self.download_dir)
@@ -137,15 +155,35 @@ class VideoApp(QWidget):
     def apply_theme(self):
         style = style_sheets.DARK_STYLE if self.is_dark_theme else style_sheets.LIGHT_STYLE
         self.setStyleSheet(style)
-        self.btn_theme.setText("🌙 ТЕМНАЯ" if self.is_dark_theme else "☀️ СВЕТЛАЯ")
-
-    def toggle_video(self, state):
-        self.video_frame.setVisible(bool(state))
-        self.adjustSize()
+        self.btn_theme.setText("☀️" if self.is_dark_theme else "🌙")
 
     def toggle_logs(self):
-        self.log_box.setVisible(not self.log_box.isVisible())
-        self.adjustSize()
+        """Показать логи"""
+        if self.logs_window:
+            self.logs_window.show()
+            self.logs_window.raise_()
+
+    def show_logs(self):
+        """Показать окно логов"""
+        if self.logs_window:
+            self.logs_window.show()
+            self.logs_window.raise_()
+
+    def show_player(self):
+        """Показать окно плеера и скрыть текущее"""
+        if self.player_window:
+            self.player_window.show()
+            self.player_window.raise_()
+
+    def exit_app(self):
+        """Выход из приложения"""
+        import sys
+        sys.exit(0)
+
+    def log_message(self, text: str, level: str = "INFO"):
+        """Отправить сообщение в логи"""
+        if self.logs_window:
+            self.logs_window.add_log(text, level)
 
     def clean_ansi(self, text):
         """Удаляет ANSI-коды (цвета консоли) из строки."""
@@ -163,65 +201,91 @@ class VideoApp(QWidget):
             msg = self.clean_ansi(data.get('msg', ''))
 
             if status == 'error':
-                self.status_label.setText(f"Ошибка: {msg}") # Исправлено: self.label -> self.status_label
-                self.add_log(msg, "ERROR")
+                self.status_label.setText(f"❌ Ошибка: {msg}")
+                self.log_message(msg, "ERROR")
             
             elif status == 'downloading':
                 percent = data.get('percent', 0)
                 self.progress_bar.show()
                 self.progress_bar.setValue(percent)
-                self.status_label.setText(f"Загрузка: {percent}% ({speed})")
-                self.eta_label.setText(f"Осталось: {eta}")
+                self.status_label.setText(f"⬇️ Загрузка: {percent}% ({speed})")
+                self.eta_label.setText(f"⏱ {eta}")
+                self.log_message(f"Загрузка: {percent}% ({speed})", "DOWNLOAD")
 
             elif status == 'processing':
-                self.status_label.setText(msg)
+                self.status_label.setText(f"⚙️ {msg}")
                 self.progress_bar.setRange(0, 0)
+                self.log_message(msg, "PROCESS")
         else:
-            self.add_log(str(data))
-
-    def init_vlc(self):
-        self.vlc_inst = vlc.Instance('--quiet')
-        self.player = self.vlc_inst.media_player_new()
-        self.player.set_hwnd(self.video_frame.winId())
+            self.log_message(str(data))
 
     def start_download(self):
         url = self.url_input.text().strip()
         if not url:
+            self.log_message("Пожалуйста введите URL", "ERROR")
             return
-        self.log_box.clear()
-        use_conv = getattr(self, "cb_use_workers", None)
-        use_conv_val = use_conv.isChecked() if use_conv is not None else True
-        self.dl_thread = VideoDownloaderThread(url, self.download_dir, use_conversion=use_conv_val)
+        
+        self.log_message(f"🔗 Начало скачивания: {url}", "DOWNLOAD")
+        
+        # Сохраняем ссылку в Sheets
+        if self.sheets_manager:
+            self.sheets_manager.add_link(url, status="pending")
+        
+        cookies = self.cookies_input.text().strip() or None
+        self.dl_thread = VideoDownloaderThread(
+            url,
+            self.download_dir,
+            use_conversion=self.cb_use_workers.isChecked(),
+            cookies_path=cookies
+        )
         self.dl_thread.progress_signal.connect(self.update_ui)
         self.dl_thread.finished_signal.connect(self.handle_finish)
         self.dl_thread.start()
 
     def open_local(self):
-        p, _ = QFileDialog.getOpenFileName(self, "Открыть видео", self.download_dir, "Video (*.mp4 *.mkv *.avi)")
-        if p: self.play_final(p)
+        """Открыть локальный файл в плеере."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, 
+            "Открыть видео", 
+            self.download_dir, 
+            "Видео (*.mp4 *.mkv *.avi *.mov *.webm);;Все файлы (*)"
+        )
+        if file_path and self.player_window:
+            self.log_message(f"📂 Открыт файл: {os.path.basename(file_path)}", "INFO")
+            self.player_window.play_file(file_path)
+            self.player_window.show()
+            self.player_window.raise_()
 
     def handle_finish(self, path: str):
+        url = self.url_input.text().strip()
+        
         if path:
-            self.add_log(f"Загрузка завершена: {path}", "SUCCESS")
-        # проигрываем файл (play_final уже делает логику проверки/проигрывания)
-            self.play_final(path)
+            self.log_message(f"✓ Загрузка завершена: {path}", "SUCCESS")
+            self.status_label.setText(f"✓ Готово: {os.path.basename(path)}")
+            
+            # Сохраняем успех в Sheets
+            if self.sheets_manager:
+                title = os.path.splitext(os.path.basename(path))[0]
+                self.sheets_manager.add_success_log(url, title, path)
+            
+            # Передаём файл в окно плеера и автоматически открываем его
+            if self.player_window:
+                self.player_window.play_file(path)
+                self.player_window.show()
+                self.player_window.raise_()
         else:
-            self.add_log("Загрузка завершилась без файла", "ERROR")
+            self.log_message("❌ Загрузка завершилась без файла", "ERROR")
+            self.status_label.setText("❌ Ошибка загрузки")
+            
+            # Сохраняем ошибку в Sheets
+            if self.sheets_manager:
+                self.sheets_manager.add_error_log(url, "Загрузка завершилась без файла")
+        
         # скрыть прогрессбар / восстановить состояние UI
-            self.progress_bar.hide()
-    
-    def play_final(self, path):
-        if not path:
-            self.add_log("Завершено без файла", "ERROR")
-            return
         self.progress_bar.hide()
-        self.progress_bar.setRange(0, 100)
         self.eta_label.setText("")
-        self.player.set_media(self.vlc_inst.media_new(path))
-        self.player.play()
-        self.status_label.setText(f"Воспроизведение: {os.path.basename(path)}")
-        self.add_log(f"Файл готов: {path}", "SUCCESS")
 
-    def vlc_play(self): self.player.play()
-    def vlc_pause(self): self.player.pause()
-    def vlc_stop(self): self.player.stop()
+    def browse_cookies(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Выберите cookies.txt (Netscape format)", "", "Cookies (*.txt);;All Files (*)")
+        if file_path:
+            self.cookies_input.setText(file_path)
