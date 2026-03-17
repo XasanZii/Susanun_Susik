@@ -1,6 +1,6 @@
 import os, vlc
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-                             QLabel, QFrame, QFileDialog, QSlider)
+                             QLabel, QFrame, QFileDialog, QSlider, QComboBox)
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
 import ui.style_sheets as style_sheets
@@ -23,8 +23,8 @@ class PlayerWindow(QWidget):
         self.current_file = None
         self.config_file = "config.json"
         settings = self.load_settings()
-        self.theme_index = settings.get("theme_index", 0)  # 0=dark, 1=light, 2=alice, 3=miku
-        self.themes = ["dark", "light", "alice", "miku"]
+        self.theme_index = settings.get("theme_index", 0)  # 0-6 for 7 themes
+        self.themes = ["dark", "light", "alice", "miku", "lena", "ulyana", "slavi"]
         self.is_dark_theme = (self.theme_index == 0)
         
         self.init_vlc()
@@ -77,12 +77,14 @@ class PlayerWindow(QWidget):
         self.btn_to_download.clicked.connect(self.show_download)
         top_layout.addWidget(self.btn_to_download)
         
-        # Кнопка темы (маленькая иконка)
-        self.btn_theme = QPushButton("🌙")
-        self.btn_theme.setMaximumWidth(40)
-        self.btn_theme.setMaximumHeight(35)
-        self.btn_theme.clicked.connect(self.toggle_theme)
-        top_layout.addWidget(self.btn_theme)
+        # Выпадающее меню для выбора темы
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItems(["🌙 Темная", "☀️ Светлая", "🧡 Алиса (Рыжая)", "💙 Мику (Аквамарин)", "� Лена (Фиолетовая)", "❤️ Ульяна (Красная)", "🌾 Слави (Сена)"])
+        self.theme_combo.setMaximumWidth(250)
+        self.theme_combo.setMinimumHeight(35)
+        self.theme_combo.setCurrentIndex(self.theme_index)
+        self.theme_combo.currentIndexChanged.connect(self.on_theme_changed)
+        top_layout.addWidget(self.theme_combo)
         
         # Кнопка логов
         self.btn_log = QPushButton("Логи")
@@ -149,6 +151,27 @@ class PlayerWindow(QWidget):
         self.btn_stop.setProperty("class", "danger")
         self.btn_stop.clicked.connect(self.vlc_stop)
         controls_layout.addWidget(self.btn_stop)
+        
+        # Регулятор громкости
+        controls_layout.addSpacing(20)
+        volume_label = QLabel("🔊 Звук:")
+        volume_label.setMaximumWidth(60)
+        controls_layout.addWidget(volume_label)
+        
+        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.volume_slider.setMinimum(0)
+        self.volume_slider.setMaximum(100)
+        self.volume_slider.setValue(100)
+        self.volume_slider.setMaximumWidth(150)
+        self.volume_slider.sliderMoved.connect(self.change_volume)
+        controls_layout.addWidget(self.volume_slider)
+        
+        # Кнопка полного экрана
+        self.btn_fullscreen = QPushButton("🖥️ Полный экран")
+        self.btn_fullscreen.setMinimumHeight(40)
+        self.btn_fullscreen.setProperty("class", "info")
+        self.btn_fullscreen.clicked.connect(self.toggle_fullscreen)
+        controls_layout.addWidget(self.btn_fullscreen)
         
         self.main_layout.addLayout(controls_layout)
 
@@ -233,6 +256,8 @@ class PlayerWindow(QWidget):
 
     def show_download(self):
         """Показать окно загрузки"""
+        # Остановить видео перед переходом
+        self.vlc_stop()
         if self.download_window:
             self.download_window.show()
             self.download_window.raise_()
@@ -247,12 +272,24 @@ class PlayerWindow(QWidget):
     def toggle_theme(self):
         """Переключить тему"""
         self.theme_index = (self.theme_index + 1) % len(self.themes)
+        self.theme_combo.setCurrentIndex(self.theme_index)
+        self.apply_theme()
+        self.save_settings()
+
+    def on_theme_changed(self, index):
+        """Обработчик изменения темы из выпадающего меню"""
+        self.theme_index = index
         self.apply_theme()
         self.save_settings()
         if self.download_window:
             self.download_window.theme_index = self.theme_index
-            self.download_window.apply_theme()
-            self.download_window.save_settings()
+            self.download_window.on_theme_changed(index)
+
+    def update_theme_combo(self):
+        """Обновить индекс в комбо боксе"""
+        self.theme_combo.blockSignals(True)
+        self.theme_combo.setCurrentIndex(self.theme_index)
+        self.theme_combo.blockSignals(False)
 
     def apply_theme(self):
         """Применить тему к окну"""
@@ -261,20 +298,57 @@ class PlayerWindow(QWidget):
             "dark": style_sheets.DARK_STYLE,
             "light": style_sheets.LIGHT_STYLE,
             "alice": style_sheets.ALICE_ORANGE_STYLE,
-            "miku": style_sheets.MIKU_CYAN_STYLE
+            "miku": style_sheets.MIKU_CYAN_STYLE,
+            "lena": style_sheets.LENA_LIGHT_BLUE_STYLE,
+            "ulyana": style_sheets.ULYANA_PINK_STYLE,
+            "slavi": style_sheets.SLAVI_PURPLE_STYLE
         }
         self.is_dark_theme = (theme_name == "dark")
         style = theme_map.get(theme_name, style_sheets.DARK_STYLE)
         self.setStyleSheet(style)
-        
-        # Иконка кнопки зависит от темы
-        theme_icons = {
-            "dark": "🌙",
-            "light": "☀️",
-            "alice": "🧡",
-            "miku": "💙"
-        }
-        self.btn_theme.setText(theme_icons.get(theme_name, "🌙"))
+
+    def change_volume(self, value):
+        """Изменить громкость"""
+        if self.player:
+            self.player.audio_set_volume(value)
+
+    def toggle_fullscreen(self):
+        """Переключить полный экран"""
+        if self.isFullScreen():
+            self.showNormal()
+            self.btn_fullscreen.setText("🖥️ Полный экран")
+        else:
+            self.showFullScreen()
+            self.btn_fullscreen.setText("🖥️ Нормальный размер")
+
+    def keyPressEvent(self, event):
+        """Обработка нажатий клавиш"""
+        if event.key() == Qt.Key.Key_Left:
+            # Листать на 10 секунд назад
+            current = self.player.get_time()
+            new_time = max(0, current - 10000)  # VLC использует миллисекунды
+            self.player.set_time(new_time)
+            event.accept()
+        elif event.key() == Qt.Key.Key_Right:
+            # Листать на 10 секунд вперед
+            current = self.player.get_time()
+            duration = self.player.get_length()
+            new_time = min(duration, current + 10000)  # VLC использует миллисекунды
+            self.player.set_time(new_time)
+            event.accept()
+        elif event.key() == Qt.Key.Key_Space:
+            # Пауза/воспроизведение по пробелу
+            if self.player.is_playing():
+                self.vlc_pause()
+            else:
+                self.vlc_play()
+            event.accept()
+        elif event.key() == Qt.Key.Key_F:
+            # Полный экран по F
+            self.toggle_fullscreen()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
 
     def exit_app(self):
         """Выход из приложения"""
