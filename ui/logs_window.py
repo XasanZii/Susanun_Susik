@@ -32,6 +32,8 @@ class LogsWindow(QWidget):
         self.logs_history = []
         
         self.is_dark_theme = True
+        self.theme_index = 0
+        self.themes = ["dark", "light", "alice", "miku"]
         self.init_ui()
         self.apply_theme()
 
@@ -43,7 +45,7 @@ class LogsWindow(QWidget):
 
         # Заголовок с статистикой
         header_layout = QHBoxLayout()
-        self.title_label = QLabel("📋 ЛОГ ПРИЛОЖЕНИЯ")
+        self.title_label = QLabel("ЛОГ ПРИЛОЖЕНИЯ")
         self.title_label.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
         
         self.stats_label = QLabel("Логов: 0 | Ошибок: 0 | Успехов: 0")
@@ -65,22 +67,26 @@ class LogsWindow(QWidget):
         # Кнопки управления
         buttons_layout = QHBoxLayout()
         
-        self.btn_copy = QPushButton("📋 Копировать")
+        self.btn_copy = QPushButton("Копировать")
         self.btn_copy.clicked.connect(self.copy_logs)
+        self.btn_copy.setProperty("class", "info")
         buttons_layout.addWidget(self.btn_copy)
         
-        self.btn_save = QPushButton("💾 Сохранить")
+        self.btn_save = QPushButton("Сохранить")
         self.btn_save.clicked.connect(self.save_logs)
+        self.btn_save.setProperty("class", "success")
         buttons_layout.addWidget(self.btn_save)
         
-        self.btn_clear = QPushButton("🗑️ Очистить")
+        self.btn_clear = QPushButton("Очистить")
         self.btn_clear.clicked.connect(self.clear_logs)
+        self.btn_clear.setProperty("class", "info")
         buttons_layout.addWidget(self.btn_clear)
         
         buttons_layout.addStretch()
         
-        self.btn_close = QPushButton("❌ Закрыть")
+        self.btn_close = QPushButton("Закрыть")
         self.btn_close.clicked.connect(self.close)
+        self.btn_close.setProperty("class", "danger")
         buttons_layout.addWidget(self.btn_close)
         
         main_layout.addLayout(buttons_layout)
@@ -160,8 +166,24 @@ class LogsWindow(QWidget):
 
     def apply_theme(self, is_dark=True):
         """Применение темы"""
-        self.is_dark_theme = is_dark
-        style = style_sheets.DARK_STYLE if is_dark else style_sheets.LIGHT_STYLE
+        # Если передан параметр is_dark (старый способ), используем его
+        # Иначе используем theme_index для новых тем
+        if isinstance(is_dark, bool):
+            self.is_dark_theme = is_dark
+            theme_name = "dark" if is_dark else "light"
+            self.theme_index = 0 if is_dark else 1
+        else:
+            theme_name = self.themes[self.theme_index] if hasattr(self, 'theme_index') else "dark"
+            self.is_dark_theme = (theme_name == "dark")
+        
+        theme_map = {
+            "dark": style_sheets.DARK_STYLE,
+            "light": style_sheets.LIGHT_STYLE,
+            "alice": style_sheets.ALICE_ORANGE_STYLE,
+            "miku": style_sheets.MIKU_CYAN_STYLE
+        }
+        
+        style = theme_map.get(theme_name if isinstance(is_dark, bool) else self.themes[getattr(self, 'theme_index', 0)], style_sheets.DARK_STYLE)
         self.setStyleSheet(style)
 
     def get_logs_json(self):

@@ -28,3 +28,5 @@ build/
 config.json
 chromewebstore.google.com_cookies.txt
 config.json
+ui/main_window.py
+config.json

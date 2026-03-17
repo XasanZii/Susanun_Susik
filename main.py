@@ -19,8 +19,7 @@ if __name__ == "__main__":
     # Связываем окна между собой
     player_window.download_window = download_window
     
-    # Показываем оба основных окна
+    # Показываем только окно загрузки при старте
     download_window.show()
-    player_window.show()
     
     sys.exit(app.exec())

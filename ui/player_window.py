@@ -3,6 +3,8 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                              QLabel, QFrame, QFileDialog, QSlider)
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
+import ui.style_sheets as style_sheets
+import json
 
 
 class PlayerWindow(QWidget):
@@ -19,11 +21,33 @@ class PlayerWindow(QWidget):
         self.download_window = None  # Будет установлено в main.py
         
         self.current_file = None
-        self.is_dark_theme = True
+        self.config_file = "config.json"
+        settings = self.load_settings()
+        self.theme_index = settings.get("theme_index", 0)  # 0=dark, 1=light, 2=alice, 3=miku
+        self.themes = ["dark", "light", "alice", "miku"]
+        self.is_dark_theme = (self.theme_index == 0)
         
         self.init_vlc()
         self.init_ui()
+        self.apply_theme()
         self.setup_timer()
+
+    def load_settings(self):
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, 'r') as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+    def save_settings(self):
+        data = {"dark_theme": self.is_dark_theme, "theme_index": self.theme_index}
+        try:
+            with open(self.config_file, 'w') as f:
+                json.dump(data, f)
+        except Exception as e:
+            pass
 
     def init_vlc(self):
         """Инициализация VLC."""
@@ -33,8 +57,8 @@ class PlayerWindow(QWidget):
     def init_ui(self):
         """Создание интерфейса игрока."""
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setSpacing(8)
-        self.main_layout.setContentsMargins(10, 10, 10, 10)
+        self.main_layout.setSpacing(10)
+        self.main_layout.setContentsMargins(15, 15, 15, 15)
 
         # Верхняя панель управления
         top_layout = QHBoxLayout()
@@ -46,12 +70,14 @@ class PlayerWindow(QWidget):
         top_layout.addStretch()
         
         # Кнопка переключения на загрузку
-        self.btn_to_download = QPushButton("⬇️ ЗАГРУЗКА")
-        self.btn_to_download.setMaximumWidth(110)
+        self.btn_to_download = QPushButton("Загрузка")
+        self.btn_to_download.setMaximumWidth(100)
+        self.btn_to_download.setMinimumHeight(35)
+        self.btn_to_download.setProperty("class", "success")
         self.btn_to_download.clicked.connect(self.show_download)
         top_layout.addWidget(self.btn_to_download)
         
-        # Кнопка темы (маленькая)
+        # Кнопка темы (маленькая иконка)
         self.btn_theme = QPushButton("🌙")
         self.btn_theme.setMaximumWidth(40)
         self.btn_theme.setMaximumHeight(35)
@@ -59,16 +85,18 @@ class PlayerWindow(QWidget):
         top_layout.addWidget(self.btn_theme)
         
         # Кнопка логов
-        self.btn_log = QPushButton("📋")
-        self.btn_log.setMaximumWidth(40)
+        self.btn_log = QPushButton("Логи")
+        self.btn_log.setMaximumWidth(60)
         self.btn_log.setMaximumHeight(35)
+        self.btn_log.setProperty("class", "info")
         self.btn_log.clicked.connect(self.show_logs)
         top_layout.addWidget(self.btn_log)
         
         # Кнопка выхода
-        self.btn_exit = QPushButton("❌")
-        self.btn_exit.setMaximumWidth(40)
-        self.btn_exit.setMaximumHeight(35)
+        self.btn_exit = QPushButton("Выход")
+        self.btn_exit.setMaximumWidth(80)
+        self.btn_exit.setMinimumHeight(35)
+        self.btn_exit.setProperty("class", "danger")
         self.btn_exit.clicked.connect(self.exit_app)
         top_layout.addWidget(self.btn_exit)
         
@@ -98,19 +126,27 @@ class PlayerWindow(QWidget):
         # Контрольные кнопки
         controls_layout = QHBoxLayout()
         
-        self.btn_open = QPushButton("📂 ОТКРЫТЬ")
+        self.btn_open = QPushButton("Открыть файл")
+        self.btn_open.setMinimumHeight(40)
+        self.btn_open.setProperty("class", "info")
         self.btn_open.clicked.connect(self.open_file)
         controls_layout.addWidget(self.btn_open)
         
-        self.btn_play = QPushButton("▶️ ВОСПРОИЗВЕДЕНИЕ")
+        self.btn_play = QPushButton("Воспроизведение")
+        self.btn_play.setMinimumHeight(40)
+        self.btn_play.setProperty("class", "primary")
         self.btn_play.clicked.connect(self.vlc_play)
         controls_layout.addWidget(self.btn_play)
         
-        self.btn_pause = QPushButton("⏸️ ПАУЗА")
+        self.btn_pause = QPushButton("Пауза")
+        self.btn_pause.setMinimumHeight(40)
+        self.btn_pause.setProperty("class", "info")
         self.btn_pause.clicked.connect(self.vlc_pause)
         controls_layout.addWidget(self.btn_pause)
         
-        self.btn_stop = QPushButton("⏹️ СТОП")
+        self.btn_stop = QPushButton("Стоп")
+        self.btn_stop.setMinimumHeight(40)
+        self.btn_stop.setProperty("class", "danger")
         self.btn_stop.clicked.connect(self.vlc_stop)
         controls_layout.addWidget(self.btn_stop)
         
@@ -200,6 +236,7 @@ class PlayerWindow(QWidget):
         if self.download_window:
             self.download_window.show()
             self.download_window.raise_()
+            self.hide()
 
     def show_logs(self):
         """Показать окно логов"""
@@ -209,8 +246,35 @@ class PlayerWindow(QWidget):
 
     def toggle_theme(self):
         """Переключить тему"""
-        self.is_dark_theme = not self.is_dark_theme
-        self.btn_theme.setText("☀️" if self.is_dark_theme else "🌙")
+        self.theme_index = (self.theme_index + 1) % len(self.themes)
+        self.apply_theme()
+        self.save_settings()
+        if self.download_window:
+            self.download_window.theme_index = self.theme_index
+            self.download_window.apply_theme()
+            self.download_window.save_settings()
+
+    def apply_theme(self):
+        """Применить тему к окну"""
+        theme_name = self.themes[self.theme_index]
+        theme_map = {
+            "dark": style_sheets.DARK_STYLE,
+            "light": style_sheets.LIGHT_STYLE,
+            "alice": style_sheets.ALICE_ORANGE_STYLE,
+            "miku": style_sheets.MIKU_CYAN_STYLE
+        }
+        self.is_dark_theme = (theme_name == "dark")
+        style = theme_map.get(theme_name, style_sheets.DARK_STYLE)
+        self.setStyleSheet(style)
+        
+        # Иконка кнопки зависит от темы
+        theme_icons = {
+            "dark": "🌙",
+            "light": "☀️",
+            "alice": "🧡",
+            "miku": "💙"
+        }
+        self.btn_theme.setText(theme_icons.get(theme_name, "🌙"))
 
     def exit_app(self):
         """Выход из приложения"""

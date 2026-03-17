@@ -17,12 +17,13 @@ class VideoDownloaderThread(QThread):
     progress_signal = pyqtSignal(dict)
     finished_signal = pyqtSignal(str)
 
-    def __init__(self, url: str, download_dir: str, use_conversion: bool = True, cookies_path: str | None = None):
+    def __init__(self, url: str, download_dir: str, use_conversion: bool = True, cookies_path: str | None = None, output_format: str = "mp4"):
         super().__init__()
         self.url = url
         self.download_dir = download_dir
         self.use_conversion = use_conversion
         self.cookies_path = cookies_path
+        self.output_format = output_format.lower()  # mp4 или mp3
 
     def run(self):
         try:
@@ -36,12 +37,16 @@ class VideoDownloaderThread(QThread):
                 "progress_hooks": [self.progress_hook],
                 "quiet": True,
                 "nocheckcertificate": True,
+                "cookies_from_browser": (
+                    "chrome", "edge", "firefox", "opera", "vivaldi", "yandex", "zen"
+                ),  # Поддержка множества браузеров
                 # for debugging, you can set verbose True temporarily
                 # "verbose": True,
             }
 
             if self.cookies_path:
                 ydl_opts["cookiefile"] = self.cookies_path
+                ydl_opts.pop("cookies_from_browser", None)  # Исключаем auto-cookies если указан файл
 
             downloaded_file = ""
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -70,11 +75,19 @@ class VideoDownloaderThread(QThread):
             # Конвертация через SusikMedia (опционально)
             if self.use_conversion:
                 name = os.path.splitext(os.path.basename(downloaded_file))[0]
-                final_path = os.path.join(self.download_dir, f"{name}.mp4")
-
-                self.progress_signal.emit({"status": "processing", "msg": "Запуск конвертации (SusikMedia)..."})
-                converter = MediaConverter(downloaded_file)
-                ok, result = converter.process(final_path, copy_codec=True)
+                
+                if self.output_format == "mp3":
+                    # Конвертация в MP3 (только аудио)
+                    final_path = os.path.join(self.download_dir, f"{name}.mp3")
+                    self.progress_signal.emit({"status": "processing", "msg": "Конвертация в MP3..."})
+                    converter = MediaConverter(downloaded_file)
+                    ok, result = converter.process(final_path, copy_codec=False, audio_only=True)
+                else:
+                    # Конвертация в MP4 (видео + аудио)
+                    final_path = os.path.join(self.download_dir, f"{name}.mp4")
+                    self.progress_signal.emit({"status": "processing", "msg": "Конвертация в MP4..."})
+                    converter = MediaConverter(downloaded_file)
+                    ok, result = converter.process(final_path, copy_codec=True)
 
                 if ok:
                     # удаляем оригинал (если он отличается по имени)
