@@ -25,14 +25,30 @@ class SusikMedia:
             try:
                 container = av.open(self.input_p)
                 has_streams = len(container.streams) > 0
-                container.close()
                 
                 if not has_streams:
+                    container.close()
                     return False, "Файл не содержит аудио/видео потоков"
+                
+                # Проверяем, что хотя бы один поток читаемый
+                has_readable_stream = False
+                for stream in container.streams:
+                    if stream.type in ('video', 'audio'):
+                        has_readable_stream = True
+                        break
+                
+                container.close()
+                
+                if not has_readable_stream:
+                    return False, "Файл содержит только неизвестные потоки"
                 
                 return True, "Файл валиден"
             except Exception as e:
-                return False, f"Ошибка чтения файла: {str(e)}"
+                error_str = str(e)
+                # Если ошибка о битом входном потоке, возвращаем специальное сообщение
+                if "Invalid data" in error_str:
+                    return False, f"Входной поток повреждён: {error_str}"
+                return False, f"Ошибка чтения файла: {error_str}"
                 
         except Exception as e:
             return False, f"Ошибка валидации: {str(e)}"

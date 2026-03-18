@@ -4,10 +4,10 @@ import re
 from datetime import datetime
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QLineEdit, QLabel, QProgressBar, QCheckBox, 
-                             QFileDialog, QComboBox)
+                             QFileDialog, QComboBox, QListWidget, QListWidgetItem)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
-from core.worker_threads import VideoDownloaderThread
+from core.worker_threads import VideoDownloaderThread, LinkExtractorThread
 import ui.style_sheets as style_sheets
 
 class DownloadWindow(QWidget):
@@ -32,6 +32,8 @@ class DownloadWindow(QWidget):
         # Переменные для управления загрузкой
         self.dl_thread = None
         self.downloading_file = None
+        self.le_thread = None  # LinkExtractorThread
+        self.found_links = []  # Список найденных ссылок
         
         self.init_ui()
         self.apply_theme()
@@ -160,6 +162,34 @@ class DownloadWindow(QWidget):
         cookies_layout.addStretch()
         
         form_layout.addLayout(cookies_layout)
+
+        # Поиск видео через Selenium (скрытые элементы)
+        selenium_label = QLabel("🔍 Поиск видео через браузер (для скрытых ссылок):")
+        selenium_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        form_layout.addWidget(selenium_label)
+        
+        selenium_layout = QHBoxLayout()
+        
+        self.btn_find_links = QPushButton("Найти видео (Selenium)")
+        self.btn_find_links.setMinimumHeight(35)
+        self.btn_find_links.setProperty("class", "info")
+        self.btn_find_links.clicked.connect(self.find_hidden_videos)
+        selenium_layout.addWidget(self.btn_find_links)
+        
+        self.selenium_headless_cb = QCheckBox("Скрытый режим")
+        self.selenium_headless_cb.setChecked(True)
+        selenium_layout.addWidget(self.selenium_headless_cb)
+        
+        selenium_layout.addStretch()
+        
+        form_layout.addLayout(selenium_layout)
+        
+        # Список найденных ссылок
+        self.links_list = QListWidget()
+        self.links_list.itemClicked.connect(self.on_link_selected)
+        self.links_list.setMaximumHeight(120)
+        form_layout.addWidget(QLabel("Найденные видео:"))
+        form_layout.addWidget(self.links_list)
 
         self.main_layout.addLayout(form_layout)
 
@@ -534,3 +564,70 @@ class DownloadWindow(QWidget):
         file_path, _ = QFileDialog.getOpenFileName(self, "Выберите cookies.txt (Netscape format)", "", "Cookies (*.txt);;All Files (*)")
         if file_path:
             self.cookies_input.setText(file_path)
+
+    def find_hidden_videos(self):
+        """Поиск скрытых видео через Selenium."""
+        url = self.url_input.text().strip()
+        
+        if not url:
+            self.log_message("❌ Введите URL для поиска видео", "ERROR")
+            return
+        
+        # Проверка, что URL содержит http(s)
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+            self.url_input.setText(url)
+        
+        self.log_message(f"🔍 Поиск видео на странице: {url}", "INFO")
+        self.btn_find_links.setEnabled(False)
+        self.status_label.setText("Поиск видео через браузер...")
+        
+        # Создаём поток для извлечения ссылок
+        headless = self.selenium_headless_cb.isChecked()
+        self.le_thread = LinkExtractorThread(url, headless=headless, timeout=30)
+        
+        # Подключаем сигналы
+        self.le_thread.progress_signal.connect(self.on_extraction_progress)
+        self.le_thread.finished_signal.connect(self.on_extraction_finished)
+        
+        # Запускаем поток
+        self.le_thread.start()
+
+    def on_extraction_progress(self, data):
+        """Обновление прогресса при поиске видео."""
+        msg = data.get("msg", "")
+        self.log_message(msg, "INFO")
+        self.status_label.setText(msg)
+
+    def on_extraction_finished(self, links: list):
+        """Обработка найденных ссылок."""
+        self.btn_find_links.setEnabled(True)
+        
+        if not links:
+            self.log_message("❌ Видео не найдены на странице", "WARNING")
+            self.status_label.setText("Видео не найдены")
+            return
+        
+        # Сохраняем найденные ссылки
+        self.found_links = links
+        
+        # Очищаем и обновляем список
+        self.links_list.clear()
+        
+        for i, link in enumerate(links, 1):
+            # Обрезаем длинные URL для отображения
+            display_url = link[:70] + "..." if len(link) > 70 else link
+            item = QListWidgetItem(f"{i}. {display_url}")
+            item.setData(Qt.ItemDataRole.UserRole, link)  # Сохраняем полный URL
+            self.links_list.addItem(item)
+        
+        self.log_message(f"✅ Найдено видео: {len(links)} шт.", "SUCCESS")
+        self.status_label.setText(f"Найдено видео: {len(links)}")
+
+    def on_link_selected(self, item):
+        """Обработка выбора ссылки из списка."""
+        url = item.data(Qt.ItemDataRole.UserRole)
+        if url:
+            self.url_input.setText(url)
+            self.log_message(f"✓ Ссылка выбрана: {url[:80]}...", "INFO")
+            self.start_download()
