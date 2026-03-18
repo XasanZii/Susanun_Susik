@@ -2,3 +2,5 @@ PyQt6==6.10.2
 yt_dlp==2026.3.13
 python-vlc
 requests
+selenium>=4.0.0
+webdriver-manager>=4.0.0

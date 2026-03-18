@@ -4,10 +4,10 @@ import re
 from datetime import datetime
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QLineEdit, QLabel, QProgressBar, QCheckBox, 
-                             QFileDialog, QComboBox)
+                             QFileDialog, QComboBox, QListWidget, QListWidgetItem)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
-from core.worker_threads import VideoDownloaderThread
+from core.worker_threads import VideoDownloaderThread, LinkExtractorThread
 import ui.style_sheets as style_sheets
 
 class DownloadWindow(QWidget):
@@ -22,10 +22,18 @@ class DownloadWindow(QWidget):
         
         self.config_file = "config.json"
         settings = self.load_settings()
-        self.theme_index = settings.get("theme_index", 0)  # 0=dark, 1=light, 2=alice, 3=miku
-        self.themes = ["dark", "light", "alice", "miku"]
+        self.theme_index = settings.get("theme_index", 0)  # 0-6 for 7 themes
+        self.themes = ["dark", "light", "alice", "miku", "lena", "ulyana", "slavi"]
         self.is_dark_theme = (self.theme_index == 0)
         self.download_dir = settings.get("download_path", os.getcwd())
+        self.format_type = settings.get("format_type", "mp4")
+        self.resolution_quality = settings.get("resolution_quality", "best")
+        
+        # Переменные для управления загрузкой
+        self.dl_thread = None
+        self.downloading_file = None
+        self.le_thread = None  # LinkExtractorThread
+        self.found_links = []  # Список найденных ссылок
         
         self.init_ui()
         self.apply_theme()
@@ -39,7 +47,13 @@ class DownloadWindow(QWidget):
         return {}
 
     def save_settings(self):
-        data = {"dark_theme": self.is_dark_theme, "download_path": self.download_dir, "theme_index": self.theme_index}
+        data = {
+            "dark_theme": self.is_dark_theme, 
+            "download_path": self.download_dir, 
+            "theme_index": self.theme_index,
+            "format_type": self.format_type,
+            "resolution_quality": self.resolution_quality
+        }
         try:
             with open(self.config_file, "w", encoding='utf-8') as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
@@ -61,8 +75,8 @@ class DownloadWindow(QWidget):
         
         # Выпадающее меню для выбора темы
         self.theme_combo = QComboBox()
-        self.theme_combo.addItems(["🌙 Темная", "☀️ Светлая", "🧡 Алиса (Рыжая)", "💙 Мику (Аквамарин)"])
-        self.theme_combo.setMaximumWidth(200)
+        self.theme_combo.addItems(["🌙 Темная", "☀️ Светлая", "🧡 Алиса (Рыжая)", "💙 Мику (Аквамарин)", "� Лена (Фиолетовая)", "❤️ Ульяна (Красная)", "🌾 Слави (Сена)"])
+        self.theme_combo.setMaximumWidth(250)
         self.theme_combo.setMinimumHeight(35)
         self.theme_combo.setCurrentIndex(self.theme_index)
         self.theme_combo.currentIndexChanged.connect(self.on_theme_changed)
@@ -111,13 +125,32 @@ class DownloadWindow(QWidget):
         form_layout.addLayout(path_layout)
 
         # Cookies
-        cookies_label = QLabel("Cookies (опционально):")
+        cookies_label = QLabel("Аутентификация для приватных видео:")
         cookies_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
         form_layout.addWidget(cookies_label)
         
         cookies_layout = QHBoxLayout()
+        
+        # Выбор браузера для автоматического получения куков
+        browser_label = QLabel("Браузер:")
+        browser_label.setFont(QFont("Segoe UI", 10))
+        cookies_layout.addWidget(browser_label)
+        
+        self.browser_combo = QComboBox()
+        self.browser_combo.addItems(["Автоматически (все)", "Chrome", "Edge", "Firefox", "Opera", "Vivaldi", "Yandex", "Zen"])
+        self.browser_combo.setMaximumWidth(140)
+        self.browser_combo.setMinimumHeight(35)
+        cookies_layout.addWidget(self.browser_combo)
+        
+        cookies_layout.addSpacing(15)
+        
+        # Или загрузить cookies.txt вручную
+        or_label = QLabel("ИЛИ файл cookies:")
+        or_label.setFont(QFont("Segoe UI", 10))
+        cookies_layout.addWidget(or_label)
+        
         self.cookies_input = QLineEdit()
-        self.cookies_input.setPlaceholderText("Путь к cookies.txt для приватных видео")
+        self.cookies_input.setPlaceholderText("Путь к cookies.txt (Netscape format)")
         self.cookies_input.setMinimumHeight(35)
         self.cookies_browse_btn = QPushButton("Обзор")
         self.cookies_browse_btn.setMaximumWidth(100)
@@ -126,7 +159,37 @@ class DownloadWindow(QWidget):
         self.cookies_browse_btn.clicked.connect(self.browse_cookies)
         cookies_layout.addWidget(self.cookies_input)
         cookies_layout.addWidget(self.cookies_browse_btn)
+        cookies_layout.addStretch()
+        
         form_layout.addLayout(cookies_layout)
+
+        # Поиск видео через Selenium (скрытые элементы)
+        selenium_label = QLabel("🔍 Поиск видео через браузер (для скрытых ссылок):")
+        selenium_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        form_layout.addWidget(selenium_label)
+        
+        selenium_layout = QHBoxLayout()
+        
+        self.btn_find_links = QPushButton("Найти видео (Selenium)")
+        self.btn_find_links.setMinimumHeight(35)
+        self.btn_find_links.setProperty("class", "info")
+        self.btn_find_links.clicked.connect(self.find_hidden_videos)
+        selenium_layout.addWidget(self.btn_find_links)
+        
+        self.selenium_headless_cb = QCheckBox("Скрытый режим")
+        self.selenium_headless_cb.setChecked(True)
+        selenium_layout.addWidget(self.selenium_headless_cb)
+        
+        selenium_layout.addStretch()
+        
+        form_layout.addLayout(selenium_layout)
+        
+        # Список найденных ссылок
+        self.links_list = QListWidget()
+        self.links_list.itemClicked.connect(self.on_link_selected)
+        self.links_list.setMaximumHeight(120)
+        form_layout.addWidget(QLabel("Найденные видео:"))
+        form_layout.addWidget(self.links_list)
 
         self.main_layout.addLayout(form_layout)
 
@@ -148,11 +211,30 @@ class DownloadWindow(QWidget):
         options_layout.addWidget(output_label)
         
         self.format_combo = QComboBox()
-        self.format_combo.addItem("MP4 (видео)")
-        self.format_combo.addItem("MP3 (аудио)")
-        self.format_combo.setMaximumWidth(120)
+        self.format_combo.addItems(["MP4", "MP3", "WAV", "AAC", "OGG", "WebM", "MKV"])
+        # Установить последний выбранный формат
+        format_index = {"mp4": 0, "mp3": 1, "wav": 2, "aac": 3, "ogg": 4, "webm": 5, "mkv": 6}.get(self.format_type.lower(), 0)
+        self.format_combo.setCurrentIndex(format_index)
+        self.format_combo.setMaximumWidth(100)
         self.format_combo.setMinimumHeight(32)
+        self.format_combo.currentTextChanged.connect(self.on_format_changed)
         options_layout.addWidget(self.format_combo)
+        
+        options_layout.addSpacing(20)
+        
+        resolution_label = QLabel("Разрешение:")
+        resolution_label.setFont(QFont("Segoe UI", 10))
+        options_layout.addWidget(resolution_label)
+        
+        self.resolution_combo = QComboBox()
+        self.resolution_combo.addItems(["Лучшее", "1080p", "720p", "480p", "360p", "240p"])
+        # Установить последнее выбранное разрешение
+        resolution_index = {"best": 0, "1080": 1, "720": 2, "480": 3, "360": 4, "240": 5}.get(self.resolution_quality, 0)
+        self.resolution_combo.setCurrentIndex(resolution_index)
+        self.resolution_combo.setMaximumWidth(100)
+        self.resolution_combo.setMinimumHeight(32)
+        self.resolution_combo.currentTextChanged.connect(self.on_resolution_changed)
+        options_layout.addWidget(self.resolution_combo)
         
         options_layout.addStretch()
         
@@ -185,6 +267,14 @@ class DownloadWindow(QWidget):
         self.btn_load.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
         self.btn_load.clicked.connect(self.start_download)
         action_layout.addWidget(self.btn_load)
+        
+        self.btn_stop = QPushButton("❌ Остановить")
+        self.btn_stop.setMinimumHeight(45)
+        self.btn_stop.setProperty("class", "danger")
+        self.btn_stop.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        self.btn_stop.clicked.connect(self.stop_download)
+        self.btn_stop.hide()  # Скрыта по умолчанию
+        action_layout.addWidget(self.btn_stop)
         
         self.btn_file = QPushButton("Открыть файл")
         self.btn_file.setMinimumHeight(45)
@@ -250,20 +340,25 @@ class DownloadWindow(QWidget):
             "dark": style_sheets.DARK_STYLE,
             "light": style_sheets.LIGHT_STYLE,
             "alice": style_sheets.ALICE_ORANGE_STYLE,
-            "miku": style_sheets.MIKU_CYAN_STYLE
+            "miku": style_sheets.MIKU_CYAN_STYLE,
+            "lena": style_sheets.LENA_LIGHT_BLUE_STYLE,
+            "ulyana": style_sheets.ULYANA_PINK_STYLE,
+            "slavi": style_sheets.SLAVI_PURPLE_STYLE
         }
         self.is_dark_theme = (theme_name == "dark")
         style = theme_map.get(theme_name, style_sheets.DARK_STYLE)
         self.setStyleSheet(style)
-        
-        # Иконка кнопки зависит от темы
-        theme_icons = {
-            "dark": "🌙",
-            "light": "☀️",
-            "alice": "🧡",
-            "miku": "💙"
-        }
-        self.btn_theme.setText(theme_icons.get(theme_name, "🌙"))
+
+    def on_format_changed(self, format_text):
+        """Обработчик изменения формата"""
+        self.format_type = format_text.lower()
+    
+    def on_resolution_changed(self, resolution_text):
+        """Обработчик изменения разрешения"""
+        if resolution_text == "Лучшее":
+            self.resolution_quality = "best"
+        else:
+            self.resolution_quality = resolution_text.replace("p", "")
 
     def toggle_logs(self):
         """Показать логи"""
@@ -338,24 +433,82 @@ class DownloadWindow(QWidget):
             self.log_message("Пожалуйста введите URL", "ERROR")
             return
         
-        output_format = self.format_combo.currentText().split()[0].lower()  # MP4 или MP3
-        self.log_message(f"Начало загрузки: {url} → {output_format}", "DOWNLOAD")
+        # Получить выбранные формат и разрешение
+        output_format = self.format_combo.currentText().lower()
+        self.format_type = output_format
+        
+        resolution_text = self.resolution_combo.currentText()
+        if resolution_text == "Лучшее":
+            self.resolution_quality = "best"
+        else:
+            self.resolution_quality = resolution_text.replace("p", "")
+        
+        self.save_settings()  # Сохранить выбор
+        
+        self.log_message(f"Начало загрузки: {url} → {output_format} ({resolution_text})", "DOWNLOAD")
         
         # Сохраняем ссылку в Sheets
         if self.sheets_manager:
             self.sheets_manager.add_link(url, status="pending")
         
+        # Получить браузер для куков
+        browser_text = self.browser_combo.currentText()
+        use_browser = None if browser_text == "Автоматически (все)" else browser_text.lower()
+        
+        # Получить путь к файлу с куками
         cookies = self.cookies_input.text().strip() or None
+        
         self.dl_thread = VideoDownloaderThread(
             url,
             self.download_dir,
             use_conversion=self.cb_use_workers.isChecked(),
             cookies_path=cookies,
-            output_format=output_format
+            output_format=output_format,
+            resolution_quality=self.resolution_quality,
+            use_browser=use_browser
         )
         self.dl_thread.progress_signal.connect(self.update_ui)
         self.dl_thread.finished_signal.connect(self.handle_finish)
         self.dl_thread.start()
+        
+        # Обновить UI - показать кнопку остановки
+        self.btn_load.hide()
+        self.btn_stop.show()
+        self.btn_file.setEnabled(False)
+        self.btn_to_player.setEnabled(False)
+
+    def stop_download(self):
+        """Остановить загрузку и удалить недокаченный файл"""
+        if self.dl_thread and self.dl_thread.isRunning():
+            self.log_message("Остановка загрузки...", "PROCESS")
+            self.dl_thread.stop_download = True
+            self.dl_thread.quit()
+            self.dl_thread.wait()
+            
+            # Удалить недокаченный файл
+            if self.downloading_file and os.path.exists(self.downloading_file):
+                try:
+                    os.remove(self.downloading_file)
+                    self.log_message(f"Удален недокаченный файл: {os.path.basename(self.downloading_file)}", "PROCESS")
+                except Exception as e:
+                    self.log_message(f"Ошибка удаления файла: {e}", "ERROR")
+            
+            # Обновить UI - показать кнопку загрузки
+            self.btn_stop.hide()
+            self.btn_load.show()
+            self.btn_file.setEnabled(True)
+            self.btn_to_player.setEnabled(True)
+            
+            self.status_label.setText("Загрузка остановлена")
+            self.progress_bar.hide()
+            self.progress_bar.setRange(0, 100)
+            self.eta_label.setText("")
+        
+        # Обновить UI - показать кнопку остановки
+        self.btn_load.hide()
+        self.btn_stop.show()
+        self.btn_file.setEnabled(False)
+        self.btn_to_player.setEnabled(False)
 
     def open_local(self):
         """Открыть локальный файл в плеере."""
@@ -401,8 +554,80 @@ class DownloadWindow(QWidget):
         self.progress_bar.hide()
         self.progress_bar.setRange(0, 100)
         self.eta_label.setText("")
+        self.btn_stop.hide()
+        self.btn_load.show()
+        self.btn_file.setEnabled(True)
+        self.btn_to_player.setEnabled(True)
+        self.downloading_file = None
 
     def browse_cookies(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Выберите cookies.txt (Netscape format)", "", "Cookies (*.txt);;All Files (*)")
         if file_path:
             self.cookies_input.setText(file_path)
+
+    def find_hidden_videos(self):
+        """Поиск скрытых видео через Selenium."""
+        url = self.url_input.text().strip()
+        
+        if not url:
+            self.log_message("❌ Введите URL для поиска видео", "ERROR")
+            return
+        
+        # Проверка, что URL содержит http(s)
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+            self.url_input.setText(url)
+        
+        self.log_message(f"🔍 Поиск видео на странице: {url}", "INFO")
+        self.btn_find_links.setEnabled(False)
+        self.status_label.setText("Поиск видео через браузер...")
+        
+        # Создаём поток для извлечения ссылок
+        headless = self.selenium_headless_cb.isChecked()
+        self.le_thread = LinkExtractorThread(url, headless=headless, timeout=30)
+        
+        # Подключаем сигналы
+        self.le_thread.progress_signal.connect(self.on_extraction_progress)
+        self.le_thread.finished_signal.connect(self.on_extraction_finished)
+        
+        # Запускаем поток
+        self.le_thread.start()
+
+    def on_extraction_progress(self, data):
+        """Обновление прогресса при поиске видео."""
+        msg = data.get("msg", "")
+        self.log_message(msg, "INFO")
+        self.status_label.setText(msg)
+
+    def on_extraction_finished(self, links: list):
+        """Обработка найденных ссылок."""
+        self.btn_find_links.setEnabled(True)
+        
+        if not links:
+            self.log_message("❌ Видео не найдены на странице", "WARNING")
+            self.status_label.setText("Видео не найдены")
+            return
+        
+        # Сохраняем найденные ссылки
+        self.found_links = links
+        
+        # Очищаем и обновляем список
+        self.links_list.clear()
+        
+        for i, link in enumerate(links, 1):
+            # Обрезаем длинные URL для отображения
+            display_url = link[:70] + "..." if len(link) > 70 else link
+            item = QListWidgetItem(f"{i}. {display_url}")
+            item.setData(Qt.ItemDataRole.UserRole, link)  # Сохраняем полный URL
+            self.links_list.addItem(item)
+        
+        self.log_message(f"✅ Найдено видео: {len(links)} шт.", "SUCCESS")
+        self.status_label.setText(f"Найдено видео: {len(links)}")
+
+    def on_link_selected(self, item):
+        """Обработка выбора ссылки из списка."""
+        url = item.data(Qt.ItemDataRole.UserRole)
+        if url:
+            self.url_input.setText(url)
+            self.log_message(f"✓ Ссылка выбрана: {url[:80]}...", "INFO")
+            self.start_download()

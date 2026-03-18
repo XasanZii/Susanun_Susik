@@ -15,6 +15,7 @@ class LogLevel:
     PROCESS = {"name": "PROCESS", "color": "#f4d03f", "icon": "⚙"}
     DOWNLOAD = {"name": "DOWNLOAD", "color": "#3498db", "icon": "⬇"}
     CONVERT = {"name": "CONVERT", "color": "#9b59b6", "icon": "◆"}
+    DEBUG = {"name": "DEBUG", "color": "#95a5a6", "icon": "🔍"}
 
 
 class LogsWindow(QWidget):
@@ -33,7 +34,7 @@ class LogsWindow(QWidget):
         
         self.is_dark_theme = True
         self.theme_index = 0
-        self.themes = ["dark", "light", "alice", "miku"]
+        self.themes = ["dark", "light", "alice", "miku", "lena", "ulyana", "slavi"]
         self.init_ui()
         self.apply_theme()
 
@@ -180,7 +181,10 @@ class LogsWindow(QWidget):
             "dark": style_sheets.DARK_STYLE,
             "light": style_sheets.LIGHT_STYLE,
             "alice": style_sheets.ALICE_ORANGE_STYLE,
-            "miku": style_sheets.MIKU_CYAN_STYLE
+            "miku": style_sheets.MIKU_CYAN_STYLE,
+            "lena": style_sheets.LENA_LIGHT_BLUE_STYLE,
+            "ulyana": style_sheets.ULYANA_PINK_STYLE,
+            "slavi": style_sheets.SLAVI_PURPLE_STYLE
         }
         
         style = theme_map.get(theme_name if isinstance(is_dark, bool) else self.themes[getattr(self, 'theme_index', 0)], style_sheets.DARK_STYLE)
