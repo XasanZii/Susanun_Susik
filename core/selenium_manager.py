@@ -215,12 +215,15 @@ class SeleniumManager:
         except:
             return []
     
-    def execute_script(self, script: str) -> any:
-        """Выполняет JavaScript."""
+    def execute_script(self, script: str, *args) -> any:
+        """Выполняет JavaScript с аргументами."""
         if not self.driver:
             return None
         try:
-            return self.driver.execute_script(script)
+            if args:
+                return self.driver.execute_script(script, *args)
+            else:
+                return self.driver.execute_script(script)
         except Exception as e:
             print(f"⚠️ Ошибка при выполнении скрипта: {e}")
             return None
@@ -249,6 +252,110 @@ class SeleniumManager:
         if not self.driver:
             return ""
         return self.driver.title
+    
+    def click_video_player(self) -> bool:
+        """
+        Автоматически находит и нажимает на кнопку Play видеоплеера.
+        Поддерживает HTML5, YouTube, Vimeo и другие видеоплееры.
+        
+        Returns:
+            True если успешно, False если ошибка
+        """
+        if not self.driver:
+            return False
+        
+        try:
+            print("🎬 Поиск видеоплеера...")
+            
+            # Селекторы для различных видеоплееров
+            player_selectors = [
+                # HTML5 video
+                'video',
+                'video button[aria-label*="Play"]',
+                'video button[role="button"]',
+                # YouTube Player
+                'button[aria-label="Play (k)"]',
+                'button.ytp-play-button',
+                '[role="presentation"] button[aria-label*="play" i]',
+                # Vimeo
+                'button[data-action="play"]',
+                '[data-action="play"]',
+                # Generic
+                'button[class*="play" i]',
+                '.play-button',
+                '.player-button',
+                '[role="button"][aria-label*="Play" i]',
+                'a[class*="play" i]',
+                'div[class*="play-button" i]'
+            ]
+            
+            for selector in player_selectors:
+                try:
+                    elements = self.find_elements(selector)
+                    for element in elements:
+                        try:
+                            # Проверяем видимость давайте использую javascript
+                            is_visible = self.execute_script(
+                                "return arguments[0].offsetHeight > 0 && arguments[0].offsetWidth > 0;",
+                                element
+                            )
+                            
+                            if is_visible:
+                                # Скроллим к элементу
+                                self.execute_script(
+                                    "arguments[0].scrollIntoView(true);",
+                                    element
+                                )
+                                time.sleep(0.5)
+                                
+                                # Нажимаем на элемент через JavaScript
+                                self.execute_script(
+                                    "arguments[0].click();",
+                                    element
+                                )
+                                print(f"✅ Нажал на видеоплеер: {selector}")
+                                time.sleep(1)
+                                return True
+                        except:
+                            continue
+                except:
+                    continue
+            
+            # Fallback: пробуем через JavaScript напрямую
+            print("⏳ Пробую альтернативные методы нажатия...")
+            try:
+                script = """
+                    // Для HTML5 video
+                    let video = document.querySelector('video');
+                    if (video && video.paused) {
+                        video.play();
+                        return 'HTML5 video played';
+                    }
+                    
+                    // Поиск кнопки Play
+                    let playBtn = document.querySelector('[role="button"][aria-label*="Play" i], 
+                                                          button[aria-label*="play" i],
+                                                          button[class*="play" i]');
+                    if (playBtn) {
+                        playBtn.click();
+                        return 'Play button clicked';
+                    }
+                    
+                    return 'No player found';
+                """
+                result = self.execute_script(script)
+                if result != 'No player found':
+                    print(f"✅ {result}")
+                    return True
+            except:
+                pass
+            
+            print("⚠️ Видеоплеер не найден")
+            return False
+            
+        except Exception as e:
+            print(f"❌ Ошибка при нажатии на видеоплеер: {e}")
+            return False
     
     def close(self):
         """Закрывает браузер."""

@@ -158,8 +158,13 @@ class VideoDownloaderThread(QThread):
                 "ignoreerrors": False,
             }
 
-            # Настроить браузер для автоматического получения куков
-            if self.use_browser:
+            # ПЕРВЫЙ ПРИОРИТЕТ: Проверяем сохраненные куки YouTube
+            youtube_cookies_path = os.path.join(os.getcwd(), ".youtube_cookies.json")
+            if os.path.exists(youtube_cookies_path) and is_youtube_url(self.url):
+                self.progress_signal.emit({"status": "processing", "msg": "🍪 Используются сохраненные куки YouTube..."})
+                ydl_opts["cookiefile"] = youtube_cookies_path
+            # ВТОРОЙ ПРИОРИТЕТ: Настроить браузер для автоматического получения куков
+            elif self.use_browser:
                 # Конкретный браузер
                 ydl_opts["cookies_from_browser"] = (self.use_browser,)
             else:
@@ -325,7 +330,13 @@ class VideoDownloaderThread(QThread):
                 
                 # Сначала пробуем безопасное копирование кодека
                 converter = MediaConverter(downloaded_file)
-                ok, result = converter.process(final_path, copy_codec=True, audio_only=is_audio_only)
+                ok, result = converter.process(
+                    final_path, 
+                    copy_codec=True, 
+                    audio_only=is_audio_only,
+                    target_format=self.output_format,
+                    target_resolution=self.resolution_quality
+                )
 
                 if ok:
                     # удаляем оригинал (если он отличается по имени)
@@ -447,7 +458,30 @@ class VideoDownloaderThread(QThread):
             return unknown_file
             
         try:
-            # Магические числа (magic bytes) для разных видеоформатов
+            # ПЕРВЫЙ ПРИОРИТЕТ: Пробуем ffprobe для определения
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ['ffprobe', '-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'default=noprint_wrappers=1:nokey=1:nokey=1', unknown_file],
+                    capture_output=True,
+                    timeout=5
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    # ffprobe смог прочитать файл - это валидный видеофайл
+                    self.progress_signal.emit({"status": "processing", "msg": "ℹ️ Формат определен через ffprobe"})
+                    new_file = unknown_file.replace('.unknown_video', '.mp4')
+                    try:
+                        if os.path.exists(new_file):
+                            os.remove(new_file)
+                        os.rename(unknown_file, new_file)
+                        return new_file
+                    except Exception as e:
+                        self.progress_signal.emit({"status": "warning", "msg": f"⚠️ Не удалось переименовать: {e}"})
+                        return unknown_file
+            except:
+                pass
+            
+            # ВТОРОЙ ПРИОРИТЕТ: Магические числа (magic bytes) для разных видеоформатов
             format_signatures = {
                 b'\x00\x00\x00\x20ftyp': 'mp4',      # MP4/M4A
                 b'\x00\x00\x00\x18ftyp': 'mp4',
@@ -459,14 +493,10 @@ class VideoDownloaderThread(QThread):
                 b'\xff\xfb': 'mp3',                   # MP3 (MPEG-1 Layer III)
                 b'\xff\xfa': 'mp3',                   # MP3 (MPEG-2 Layer III)
                 b'\x1f\x8b': 'gz',                    # gzip (иногда используется)
-                b'BM': 'bmp',
-                b'\x89PNG': 'png',
-                b'\xff\xd8\xff': 'jpg',
                 b'Ogg': 'ogv',                        # Ogg Vorbis/Theora
-                b'WEBP': 'webp',
-                b'\x00\x00\x01\x00': 'mov',           # MOV/QuickTime
-                b'moov': 'mov',
                 b'\x00\x00\x01\xB3': 'mpg',           # MPEG-1 Video
+                # ВАЖНО: Проверяем JPEG в конце, чтобы не спутать с видео
+                b'\xff\xd8\xff': 'jpg',
             }
             
             # Читаем первые 32 байта файла для определения формата
@@ -476,41 +506,20 @@ class VideoDownloaderThread(QThread):
             # Проверяем сигнатуры
             for signature, ext in format_signatures.items():
                 if header.startswith(signature):
+                    # ВАЖНО: Если определили как JPG/PNG/BMP, это возможно неправильно - пропускаем
+                    if ext in ('jpg', 'png', 'bmp', 'gif'):
+                        continue
+                    
                     # Переименовываем файл
                     new_file = unknown_file.replace('.unknown_video', f'.{ext}')
-                    try:
-                        if os.path.exists(new_file):
-                            os.remove(new_file)  # Удалим старый файл с таким именем если существует
-                        os.rename(unknown_file, new_file)
-                        return new_file
-                    except Exception as e:
-                        self.progress_signal.emit({"status": "warning", "msg": f"⚠️ Не удалось переименовать в .{ext}: {e}"})
-                        # Продолжаем и попробуем mp4
-                        break
-            
-            # Если не определили по magic bytes, пробуем ffprobe для определения
-            try:
-                import subprocess
-                result = subprocess.run(
-                    ['ffprobe', '-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'default=noprint_wrappers=1:nokey=1:nokey=1', unknown_file],
-                    capture_output=True,
-                    timeout=5
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    # ffprobe смог прочитать файл - этовидимо валидный видеофайл
-                    self.progress_signal.emit({"status": "processing", "msg": "ℹ️ Формат определен через ffprobe"})
-                    # Переименуем в mp4 по умолчанию
-                    new_file = unknown_file.replace('.unknown_video', '.mp4')
                     try:
                         if os.path.exists(new_file):
                             os.remove(new_file)
                         os.rename(unknown_file, new_file)
                         return new_file
                     except Exception as e:
-                        self.progress_signal.emit({"status": "warning", "msg": f"⚠️ Не удалось переименовать в .mp4: {e}"})
-                        return unknown_file
-            except:
-                pass
+                        self.progress_signal.emit({"status": "warning", "msg": f"⚠️ Не удалось переименовать: {e}"})
+                        break
             
             # FALLBACK: Если ничего не сработало, переименуем в .mp4 в любом случае
             self.progress_signal.emit({"status": "processing", "msg": "ℹ️ Формат не определен, переименовываю в .mp4 по умолчанию"})

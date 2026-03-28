@@ -53,7 +53,7 @@ class SusikMedia:
         except Exception as e:
             return False, f"Ошибка валидации: {str(e)}"
 
-    def process_conversion(self, output_p, copy_codec=True, audio_only=False):
+    def process_conversion(self, output_p, copy_codec=True, audio_only=False, target_format=None, target_resolution=None):
         """
         Возвращает (True, "Success") или (False, "error message")
         
@@ -61,6 +61,8 @@ class SusikMedia:
             output_p: Путь сохранения
             copy_codec: Копировать оригинальный кодек
             audio_only: Если True, извлекает только аудио (MP3)
+            target_format: Целевой формат (mp4, webm и т.д.)
+            target_resolution: Целевое разрешение (720, 480 и т.д.)
         """
         # Валидация входного файла
         is_valid, validation_msg = self.validate_input_file()
@@ -95,6 +97,16 @@ class SusikMedia:
                             out_stream.width = stream.width
                             out_stream.height = stream.height
                             out_stream.pix_fmt = 'yuv420p'
+                            
+                            # Применяем целевое разрешение если указано
+                            if target_resolution:
+                                try:
+                                    height = int(target_resolution)
+                                    width = int(stream.width * height / stream.height)
+                                    out_stream.width = width
+                                    out_stream.height = height
+                                except:
+                                    pass
                         else:  # audio
                             codec = 'aac' if not audio_only else 'libmp3lame'
                             out_stream = output_container.add_stream(codec)
@@ -144,8 +156,8 @@ class SusikMedia:
 
         except Exception as e:
             error_str = str(e)
-            # Если ошибка кодека и copy_codec=False, пробуем с копированием
-            if not copy_codec and ("codec" in error_str.lower() or "Invalid data" in error_str):
+            # Если ошибка кодека и copy_codec=True, пробуем с перекодированием
+            if copy_codec and ("codec" in error_str.lower() or "Invalid data" in error_str or "not found" in error_str.lower()):
                 try:
                     # Закрываем текущие контейнеры
                     if output_container:
@@ -166,8 +178,8 @@ class SusikMedia:
                         except:
                             pass
                     
-                    # Повторяем с copy_codec=True
-                    return self.process_conversion(output_p, copy_codec=True, audio_only=audio_only)
+                    # Повторяем с copy_codec=False (перекодирование)
+                    return self.process_conversion(output_p, copy_codec=False, audio_only=audio_only, target_format=target_format, target_resolution=target_resolution)
                 except Exception as retry_error:
                     return False, f"Ошибка конвертации (оба метода): {str(retry_error)}"
             else:
