@@ -10,6 +10,7 @@ from typing import List, Dict, Optional, Tuple
 from urllib.parse import urlparse, parse_qs
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
@@ -365,6 +366,296 @@ class LinkExtractor:
                     self.driver.quit()
                 except:
                     pass
+    
+    
+    def click_video_player(self) -> bool:
+        """
+        Автоматически находит и нажимает на кнопку Play видеоплеера.
+        Поддерживает различные виды видеоплееров (HTML5, YouTube, Vimeo и т.д.)
+        
+        Returns:
+            True если успешно найден и нажат видеоплеер, False если ошибка
+        """
+        if not self.driver:
+            print("❌ Драйвер не инициализирован")
+            return False
+        
+        try:
+            print("🎬 Поиск видеоплеера...")
+            
+            # Селекторы для различных видеоплееров
+            player_selectors = [
+                # HTML5 video
+                'video', 'video button[aria-label*="Play"]', 'video button[role="button"]',
+                # YouTube Player
+                'button[aria-label="Play (k)"]', 'button.ytp-play-button',
+                '[role="presentation"] button[aria-label*="play" i]',
+                # Vimeo
+                'button[data-action="play"]', '[data-action="play"]',
+                # Generic
+                'button[class*="play" i]', '.play-button', '.player-button',
+                '[role="button"][aria-label*="Play" i]',
+                'a[class*="play" i]', 'div[class*="play-button" i]'
+            ]
+            
+            for selector in player_selectors:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for element in elements:
+                        # Проверяем видимость элемента
+                        if element.is_displayed():
+                            # Проверяем, что это именно кнопка Play
+                            text = element.get_attribute('aria-label') or element.text or ""
+                            if "play" in text.lower() or "play" in selector.lower():
+                                try:
+                                    # Скроллим к элементу
+                                    self.driver.execute_script(
+                                        "arguments[0].scrollIntoView(true);",
+                                        element
+                                    )
+                                    time.sleep(0.5)
+                                    
+                                    # Нажимаем на элемент
+                                    element.click()
+                                    print(f"✅ Нажал на видеоплеер: {selector}")
+                                    time.sleep(1)
+                                    return True
+                                except Exception as e:
+                                    # Пробуем через JavaScript если обычный клик не сработал
+                                    try:
+                                        self.driver.execute_script(
+                                            "arguments[0].click();",
+                                            element
+                                        )
+                                        print(f"✅ Нажал на видеоплеер через JS: {selector}")
+                                        time.sleep(1)
+                                        return True
+                                    except:
+                                        continue
+                except:
+                    continue
+            
+            # Fallback: пробуем через JavaScript
+            print("⏳ Пробую альтернативные методы нажатия...")
+            try:
+                # Для HTML5 video
+                script = """
+                    let video = document.querySelector('video');
+                    if (video && video.paused) {
+                        video.play();
+                        return 'HTML5 video played';
+                    }
+                    
+                    let playBtn = document.querySelector('[role="button"][aria-label*="Play"], 
+                                                          button[aria-label*="play"],
+                                                          button[class*="play"]');
+                    if (playBtn) {
+                        playBtn.click();
+                        return 'Play button clicked';
+                    }
+                    
+                    return 'No player found';
+                """
+                result = self.driver.execute_script(script)
+                if result != 'No player found':
+                    print(f"✅ {result}")
+                    return True
+            except:
+                pass
+            
+            print("⚠️ Видеоплеер не найден")
+            return False
+            
+        except Exception as e:
+            print(f"❌ Ошибка при нажатии на видеоплеер: {e}")
+            return False
+    
+    def youtube_login(self, email: str, password: str, verify_code: str = None, save_cookies_path: str = None) -> bool:
+        """
+        Выполняет вход в YouTube аккаунт.
+        
+        Args:
+            email: Email Google аккаунта
+            password: Пароль Google аккаунта
+            verify_code: Код двухфакторной аутентификации (если нужен)
+            save_cookies_path: Путь для сохранения куки (опционально)
+        
+        Returns:
+            True если успешно, False если ошибка
+        """
+        if not self.driver:
+            self.driver = self._init_driver()
+        
+        if not self.driver:
+            print("❌ Не удалось инициализировать браузер")
+            return False
+        
+        try:
+            # Используем прямую ссылку на авторизацию
+            auth_url = "https://accounts.google.com/ServiceLogin?service=youtube&uilel=3&passive=true&continue=https%3A%2F%2Fwww.youtube.com%2Fsignin%3Faction_handle_signin%3Dtrue%26app%3Ddesktop%26hl%3Dru%26next%3Dhttps%253A%252F%252Fwww.youtube.com%252F&hl=ru&ec=65620"
+            
+            print("🔐 Переходу на страницу авторизации...")
+            self.driver.get(auth_url)
+            time.sleep(2)
+            
+            # Проверяем, может быть уже авторизованы
+            try:
+                profile_btn = WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_element_located((By.XPATH, "//yt-img-shadow[@id='avatar-btn']|//button[@aria-label='Create a video or post']"))
+                )
+                if profile_btn:
+                    print("✅ Уже авторизованы в YouTube!")
+                    return True
+            except:
+                pass
+            
+            # Вводим email
+            print("📧 Ввожу email...")
+            try:
+                email_field = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.ID, "identifierId"))
+                )
+                email_field.clear()
+                email_field.send_keys(email)
+                
+                # Нажимаем Next
+                try:
+                    next_button = WebDriverWait(self.driver, 5).until(
+                        EC.element_to_be_clickable((By.ID, "identifierNext"))
+                    )
+                    next_button.click()
+                except:
+                    # Пробуем нажать Enter
+                    email_field.send_keys(Keys.RETURN)
+                
+                time.sleep(3)
+            except TimeoutException:
+                print("❌ Поле email не найдено")
+                return False
+            except Exception as e:
+                print(f"❌ Ошибка ввода email: {e}")
+                return False
+            
+            # Вводим пароль
+            print("🔑 Ввожу пароль...")
+            try:
+                # Используем точный селектор для поля пароля
+                password_field = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "#password"))
+                )
+                password_field.clear()
+                password_field.send_keys(password)
+                
+                # Нажимаем кнопку авторизации с точным селектором
+                try:
+                    auth_button = WebDriverWait(self.driver, 5).until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, "#buttons > ytd-button-renderer > yt-button-shape > a > yt-touch-feedback-shape > div.yt-spec-touch-feedback-shape__fill"))
+                    )
+                    auth_button.click()
+                except:
+                    # Fallback: просто нажимаем Enter
+                    print("⏳ Пробую нажать Enter...")
+                    password_field.send_keys(Keys.RETURN)
+                
+                time.sleep(3)
+            except TimeoutException:
+                print("⚠️ Поле пароля не найдено (возможно требуется двухфакторная аутентификация)")
+            except Exception as e:
+                print(f"❌ Ошибка ввода пароля: {e}")
+                return False
+            
+            # Проверяем, нужна ли двухфакторная аутентификация
+            try:
+                verify_field = WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_element_located((By.XPATH, "//input[@aria-label='Enter your verification code']|//input[@name='verificationCode']"))
+                )
+                if verify_code:
+                    print(f"🔐 Ввожу код 2FA...")
+                    verify_field.clear()
+                    verify_field.send_keys(verify_code)
+                    
+                    try:
+                        verify_button = self.driver.find_element(By.ID, "verifyButton")
+                        verify_button.click()
+                    except:
+                        verify_field.send_keys(Keys.RETURN)
+                    
+                    time.sleep(3)
+                else:
+                    print("⚠️ Требуется двухфакторная аутентификация. Ввожу код вручную...")
+                    # Даём 90 секунд на ручной ввод кода
+                    for i in range(90):
+                        try:
+                            verify_field_check = self.driver.find_element(By.XPATH, "//input[@aria-label='Enter your verification code']|//input[@name='verificationCode']")
+                            if not verify_field_check:
+                                break
+                        except:
+                            break
+                        time.sleep(1)
+            except TimeoutException:
+                # 2FA не требуется
+                print("✅ 2FA не требуется")
+                pass
+            except Exception as e:
+                print(f"⚠️ Ошибка с 2FA: {e}")
+            
+            # Переходим на YouTube и проверяем авторизацию
+            print("⏳ Проверяю авторизацию...")
+            self.driver.get("https://www.youtube.com")
+            
+            # Ждём загрузки страницы
+            try:
+                WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.TAG_NAME, "body"))
+                )
+            except:
+                pass
+            
+            time.sleep(2)
+            
+            # Проверяем успешность входа
+            try:
+                profile = WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_element_located((By.XPATH, "//yt-img-shadow[@id='avatar-btn']|//button[@aria-label='Create a video or post']"))
+                )
+                print("✅ Вход в YouTube успешен!")
+                
+                # Сохраняем куки если указан путь
+                if save_cookies_path:
+                    try:
+                        cookies = self.driver.get_cookies()
+                        import json
+                        with open(save_cookies_path, 'w') as f:
+                            json.dump(cookies, f, indent=2)
+                        print(f"💾 Куки сохранены в {save_cookies_path}")
+                    except Exception as e:
+                        print(f"⚠️ Не удалось сохранить куки: {e}")
+                
+                return True
+            except:
+                print("⚠️ Статус входа неясен, но продолжаю...")
+                
+                # Все равно пробуем сохранить куки
+                if save_cookies_path:
+                    try:
+                        cookies = self.driver.get_cookies()
+                        import json
+                        with open(save_cookies_path, 'w') as f:
+                            json.dump(cookies, f, indent=2)
+                        print(f"💾 Куки сохранены в {save_cookies_path}")
+                    except Exception as e:
+                        print(f"⚠️ Не удалось сохранить куки: {e}")
+                
+                return True
+            
+        except KeyboardInterrupt:
+            print("❌ Вход отменён пользователем")
+            return False
+        except Exception as e:
+            print(f"❌ Ошибка при входе в YouTube: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
     
     def extract_with_cookies(
         self, 

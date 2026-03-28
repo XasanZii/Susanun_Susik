@@ -1,6 +1,7 @@
 import os, json
 from os import path
 import re
+import time
 from datetime import datetime
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QLineEdit, QLabel, QProgressBar, QCheckBox, 
@@ -104,7 +105,68 @@ class DownloadWindow(QWidget):
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("YouTube, Vimeo, Facebook и другие источники...")
         self.url_input.setMinimumHeight(35)
+        self.url_input.textChanged.connect(self.on_url_changed)
         form_layout.addWidget(self.url_input)
+        
+        # YouTube аутентификация (скрыта по умолчанию)
+        self.youtube_auth_label = QLabel("🔐 YouTube требует аутентификацию:")
+        self.youtube_auth_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        self.youtube_auth_label.hide()
+        form_layout.addWidget(self.youtube_auth_label)
+        
+        # Надпись о безопасности
+        self.youtube_security_note = QLabel("ℹ️ Данные не сохраняются на диск")
+        self.youtube_security_note.setFont(QFont("Segoe UI", 9))
+        self.youtube_security_note.setStyleSheet("color: #666666; font-style: italic;")
+        self.youtube_security_note.hide()
+        form_layout.addWidget(self.youtube_security_note)
+        
+        youtube_auth_layout = QHBoxLayout()
+        
+        self.yt_email_input = QLineEdit()
+        self.yt_email_input.setPlaceholderText("Email Google аккаунта")
+        self.yt_email_input.setMinimumHeight(35)
+        self.yt_email_input.setMaximumWidth(250)
+        self.yt_email_input.hide()
+        youtube_auth_layout.addWidget(self.yt_email_input)
+        
+        # Контейнер для пароля с галочкой
+        password_layout = QHBoxLayout()
+        password_layout.setContentsMargins(0, 0, 0, 0)
+        password_layout.setSpacing(5)
+        
+        self.yt_password_input = QLineEdit()
+        self.yt_password_input.setPlaceholderText("Пароль")
+        self.yt_password_input.setMinimumHeight(35)
+        self.yt_password_input.setMaximumWidth(250)
+        self.yt_password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.yt_password_input.hide()
+        password_layout.addWidget(self.yt_password_input)
+        
+        self.yt_show_password = QCheckBox("👁️")
+        self.yt_show_password.setMaximumWidth(40)
+        self.yt_show_password.toggled.connect(self.toggle_youtube_password_visibility)
+        self.yt_show_password.hide()
+        password_layout.addWidget(self.yt_show_password)
+        
+        youtube_auth_layout.addLayout(password_layout)
+        
+        self.btn_youtube_auth = QPushButton("Вход в YouTube")
+        self.btn_youtube_auth.setMinimumHeight(35)
+        self.btn_youtube_auth.setMaximumWidth(150)
+        self.btn_youtube_auth.setProperty("class", "info")
+        self.btn_youtube_auth.clicked.connect(self.do_youtube_auth)
+        self.btn_youtube_auth.hide()
+        youtube_auth_layout.addWidget(self.btn_youtube_auth)
+        
+        self.youtube_auth_status = QLabel("")
+        self.youtube_auth_status.setFont(QFont("Segoe UI", 9))
+        self.youtube_auth_status.hide()
+        youtube_auth_layout.addWidget(self.youtube_auth_status)
+        
+        youtube_auth_layout.addStretch()
+        
+        form_layout.addLayout(youtube_auth_layout)
 
         # Папка сохранения
         folder_label = QLabel("Папка сохранения:")
@@ -175,6 +237,13 @@ class DownloadWindow(QWidget):
         self.btn_find_links.setProperty("class", "info")
         self.btn_find_links.clicked.connect(self.find_hidden_videos)
         selenium_layout.addWidget(self.btn_find_links)
+        
+        self.btn_click_player = QPushButton("🎬 Клик по плееру")
+        self.btn_click_player.setMinimumHeight(35)
+        self.btn_click_player.setMaximumWidth(150)
+        self.btn_click_player.setProperty("class", "info")
+        self.btn_click_player.clicked.connect(self.click_player_button)
+        selenium_layout.addWidget(self.btn_click_player)
         
         self.selenium_headless_cb = QCheckBox("Скрытый режим")
         self.selenium_headless_cb.setChecked(True)
@@ -313,6 +382,66 @@ class DownloadWindow(QWidget):
             self.download_dir = dir_path
             self.path_display.setText(dir_path)
             self.save_settings()
+    
+    def on_url_changed(self, text):
+        """Проверяет присутствие YouTube в URL и показывает поля аутентификации"""
+        is_youtube = 'youtube' in text.lower() or 'youtu.be' in text.lower()
+        
+        self.youtube_auth_label.setVisible(is_youtube)
+        self.youtube_security_note.setVisible(is_youtube)
+        self.yt_email_input.setVisible(is_youtube)
+        self.yt_password_input.setVisible(is_youtube)
+        self.yt_show_password.setVisible(is_youtube)
+        self.btn_youtube_auth.setVisible(is_youtube)
+        self.youtube_auth_status.setVisible(is_youtube and self.youtube_auth_status.text() != "")
+    
+    def toggle_youtube_password_visibility(self, checked):
+        """Переключает видимость пароля"""
+        if checked:
+            self.yt_password_input.setEchoMode(QLineEdit.EchoMode.Normal)
+        else:
+            self.yt_password_input.setEchoMode(QLineEdit.EchoMode.Password)
+    
+    def do_youtube_auth(self):
+        """Выполняет вход в YouTube через Selenium"""
+        email = self.yt_email_input.text().strip()
+        password = self.yt_password_input.text().strip()
+        
+        if not email or not password:
+            self.youtube_auth_status.setText("❌ Введите email и пароль")
+            self.youtube_auth_status.setVisible(True)
+            return
+        
+        self.btn_youtube_auth.setEnabled(False)
+        self.youtube_auth_status.setText("⏳ Входимся в YouTube...") 
+        self.youtube_auth_status.setVisible(True)
+        
+        from core.link_extractor import LinkExtractor
+        
+        # Путь для сохранения куки
+        cookies_save_path = os.path.join(os.getcwd(), ".youtube_cookies.json")
+        
+        try:
+            extractor = LinkExtractor(headless=False, timeout=30)
+            success = extractor.youtube_login(email, password, save_cookies_path=cookies_save_path)
+            
+            if success:
+                self.youtube_auth_status.setText("✅ Успешный вход! (куки сохранены)")
+                self.youtube_auth_status.setVisible(True)
+                self.log_message("✅ Вход в YouTube успешен! Куки сохранены для последующих загрузок.", "SUCCESS")
+                # Очищаем пароль для безопасности
+                self.yt_password_input.setText("")
+                self.yt_show_password.setChecked(False)
+            else:
+                self.youtube_auth_status.setText("❌ Ошибка входа")
+                self.youtube_auth_status.setVisible(True)
+                self.log_message("❌ Ошибка входа в YouTube", "ERROR")
+        except Exception as e:
+            self.youtube_auth_status.setText(f"❌ Ошибка: {str(e)[:30]}")
+            self.youtube_auth_status.setVisible(True)
+            self.log_message(f"❌ Ошибка аутентификации: {e}", "ERROR")
+        finally:
+            self.btn_youtube_auth.setEnabled(True)
 
     def toggle_theme(self):
         self.theme_index = (self.theme_index + 1) % len(self.themes)
@@ -592,6 +721,53 @@ class DownloadWindow(QWidget):
         
         # Запускаем поток
         self.le_thread.start()
+    
+    def click_player_button(self):
+        """Нажимает на видеоплеер на открытой в браузере странице"""
+        url = self.url_input.text().strip()
+        
+        if not url:
+            self.log_message("❌ Введите URL видео", "ERROR")
+            return
+        
+        # Проверка, что URL содержит http(s)
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+        
+        self.log_message(f"🎬 Открываю видео и нажимаю play: {url}", "INFO")
+        self.btn_click_player.setEnabled(False)
+        self.status_label.setText("Открытие видео и нажатие кнопки play...")
+        
+        from core.link_extractor import LinkExtractor
+        
+        try:
+            headless = False  # Для клика пользователь должен видеть браузер
+            extractor = LinkExtractor(headless=headless, timeout=30)
+            
+            if not extractor.driver:
+                self.log_message("❌ Не удалось инициализировать браузер", "ERROR")
+                return
+            
+            # Открываем страницу
+            if extractor.driver.get(url):
+                time.sleep(2)
+                
+                # Нажимаем на видеоплеер
+                if extractor.click_video_player():
+                    self.log_message("✅ Видеоплеер успешно запущен!", "SUCCESS")
+                    self.status_label.setText("✅ Видеоплеер запущен")
+                else:
+                    self.log_message("⚠️ Не удалось найти видеоплеер", "WARNING")
+                    self.status_label.setText("⚠️ Видеоплеер не найден")
+            else:
+                self.log_message("❌ Не удалось открыть видео", "ERROR")
+                self.status_label.setText("❌ Ошибка открытия видео")
+        
+        except Exception as e:
+            self.log_message(f"❌ Ошибка: {e}", "ERROR")
+            self.status_label.setText(f"❌ Ошибка: {str(e)[:50]}")
+        finally:
+            self.btn_click_player.setEnabled(True)
 
     def on_extraction_progress(self, data):
         """Обновление прогресса при поиске видео."""
